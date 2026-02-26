@@ -1,8 +1,12 @@
-export interface QuoteResponse {
+export interface GeocodeResponse {
   address: string;
   lat: number;
   lng: number;
-  streetViewUrl: string;
+}
+
+export interface QuoteResponse {
+  lat: number;
+  lng: number;
   roofData: {
     totalAreaSqFt: number;
     segments: number;
@@ -20,6 +24,10 @@ export interface QuoteResponse {
     pitchOver12: number;
     materialNote: string;
   };
+}
+
+export interface FullQuoteData extends QuoteResponse {
+  address: string;
 }
 
 export type Step = 'address' | 'confirm' | 'quote' | 'thankyou';

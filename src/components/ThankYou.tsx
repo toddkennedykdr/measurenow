@@ -1,8 +1,8 @@
-import type { QuoteResponse } from '../types';
+import type { FullQuoteData } from '../types';
 
 interface Props {
   name: string;
-  data: QuoteResponse;
+  data: FullQuoteData;
   onStartOver: () => void;
 }
 

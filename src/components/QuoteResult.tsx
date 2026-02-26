@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
-import type { QuoteResponse } from '../types';
+import type { FullQuoteData } from '../types';
 
 interface Props {
-  data: QuoteResponse;
+  data: FullQuoteData;
   onLeadSubmitted: (name: string) => void;
 }
 

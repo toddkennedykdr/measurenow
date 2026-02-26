@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import type { QuoteResponse } from '../types';
+import type { GeocodeResponse } from '../types';
 
 interface Props {
-  onQuoteReceived: (data: QuoteResponse) => void;
+  onGeocoded: (data: GeocodeResponse) => void;
 }
 
-export function AddressForm({ onQuoteReceived }: Props) {
+export function AddressForm({ onGeocoded }: Props) {
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -18,7 +18,7 @@ export function AddressForm({ onQuoteReceived }: Props) {
     setError('');
 
     try {
-      const res = await fetch('/api/roof/quote', {
+      const res = await fetch('/api/roof/geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: address.trim() }),
@@ -31,7 +31,7 @@ export function AddressForm({ onQuoteReceived }: Props) {
         return;
       }
 
-      onQuoteReceived(data);
+      onGeocoded(data);
     } catch {
       setError('Network error. Please check your connection and try again.');
     } finally {
@@ -66,7 +66,7 @@ export function AddressForm({ onQuoteReceived }: Props) {
 
         <button type="submit" className="btn btn--primary" disabled={loading || !address.trim()}>
           {loading && <span className="spinner" />}
-          {loading ? 'Analyzing Your Roof...' : 'Get My Free Quote'}
+          {loading ? 'Finding Your Address...' : 'Get My Free Quote'}
         </button>
       </form>
     </div>

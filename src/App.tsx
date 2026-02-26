@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { QuoteResponse, Step } from './types';
+import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
 import { QuoteResult } from './components/QuoteResult';
@@ -7,20 +7,31 @@ import { ThankYou } from './components/ThankYou';
 
 export default function App() {
   const [step, setStep] = useState<Step>('address');
-  const [quoteData, setQuoteData] = useState<QuoteResponse | null>(null);
+  const [geocodeData, setGeocodeData] = useState<GeocodeResponse | null>(null);
+  const [quoteData, setQuoteData] = useState<FullQuoteData | null>(null);
   const [leadName, setLeadName] = useState('');
 
-  const handleQuoteReceived = (data: QuoteResponse) => {
-    setQuoteData(data);
+  const handleGeocoded = (data: GeocodeResponse) => {
+    setGeocodeData(data);
     setStep('confirm');
   };
 
-  const handleConfirmed = () => {
+  const handleLocationConfirmed = async (lat: number, lng: number) => {
+    // Call quote API with confirmed coordinates
+    const res = await fetch('/api/roof/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to get quote');
+    setQuoteData({ ...data, address: geocodeData!.address });
     setStep('quote');
   };
 
   const handleNotMyHome = () => {
     setStep('address');
+    setGeocodeData(null);
     setQuoteData(null);
   };
 
@@ -31,6 +42,7 @@ export default function App() {
 
   const handleStartOver = () => {
     setStep('address');
+    setGeocodeData(null);
     setQuoteData(null);
     setLeadName('');
   };
@@ -45,11 +57,17 @@ export default function App() {
       </header>
 
       {step === 'address' && (
-        <AddressForm onQuoteReceived={handleQuoteReceived} />
+        <AddressForm onGeocoded={handleGeocoded} />
       )}
 
-      {step === 'confirm' && quoteData && (
-        <ConfirmAddress data={quoteData} onConfirm={handleConfirmed} onReject={handleNotMyHome} />
+      {step === 'confirm' && geocodeData && (
+        <ConfirmAddress
+          address={geocodeData.address}
+          lat={geocodeData.lat}
+          lng={geocodeData.lng}
+          onConfirm={handleLocationConfirmed}
+          onReject={handleNotMyHome}
+        />
       )}
 
       {step === 'quote' && quoteData && (
