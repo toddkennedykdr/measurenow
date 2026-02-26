@@ -39,6 +39,7 @@ export default function ReportDetailPage() {
   const analysis = typeof report.analysis === 'string' ? JSON.parse(report.analysis) : report.analysis;
   const roofData = typeof report.roofData === 'string' ? JSON.parse(report.roofData) : report.roofData;
   const quote = typeof report.quote === 'string' ? JSON.parse(report.quote) : report.quote;
+  const reportPhotos: string[] = (typeof report.photos === 'string' ? JSON.parse(report.photos) : report.photos) || [];
   const address = report.address;
 
   const complexityRating = analysis?.complexity?.rating || 3;
@@ -94,6 +95,20 @@ export default function ReportDetailPage() {
           <button className="btn btn--outline" onClick={() => window.print()}>🖨️ Print</button>
           <button className="btn btn--secondary" onClick={() => setShowJN(true)}>📤 Send to JobNimbus</button>
         </div>
+
+        {/* Inspection Photos */}
+        {reportPhotos.length > 0 && (
+          <div className="card hover-section">
+            <h2 className="hover-section__title">📸 Inspection Photos</h2>
+            <div className="photo-gallery">
+              {reportPhotos.map((src, i) => (
+                <div key={i} className="photo-gallery__item">
+                  <img src={src} alt={`Inspection photo ${i + 1}`} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Roof Summary */}
         <div className="card hover-section">

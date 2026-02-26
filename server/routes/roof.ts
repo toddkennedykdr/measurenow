@@ -73,6 +73,10 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
         segments: building.segments.length,
         avgPitchDegrees: Math.round(building.avgPitch * 10) / 10,
         imageryQuality: building.imageryQuality,
+        footprintSqFt: building.footprintSqFt,
+        estimatedPerimeterFt: building.estimatedPerimeterFt,
+        estimatedLength: building.estimatedLength,
+        estimatedWidth: building.estimatedWidth,
       },
       quote,
     });

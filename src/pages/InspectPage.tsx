@@ -16,6 +16,24 @@ interface RoofData {
   segments: number;
   avgPitchDegrees: number;
   imageryQuality: string;
+  footprintSqFt?: number;
+  estimatedPerimeterFt?: number;
+  estimatedLength?: number;
+  estimatedWidth?: number;
+}
+
+interface BuildingMeasurements {
+  footprintSqFt: number;
+  buildingPerimeter: number;
+  buildingLength: number;
+  buildingWidth: number;
+  stories: number;
+  wallHeightPerStory: number;
+  grossWallArea: number;
+  calculatedWallArea: number;
+  openingsDeduction: number;
+  openingsPercent: number;
+  measurementSource: string;
 }
 
 interface Quote {
@@ -62,6 +80,26 @@ const PHOTO_SLOTS: string[] = [
   'Front', 'Left Side', 'Back', 'Right Side',
   'Front-Left Corner', 'Front-Right Corner', 'Back-Left Corner', 'Back-Right Corner',
 ];
+
+// Resize image file to thumbnail base64 (max 400px wide, JPEG 70%)
+function fileToThumbnail(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 400;
+      let w = img.width, h = img.height;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
 
 const COMPLEXITY_MULTIPLIERS: Record<number, number> = { 1: 1.0, 2: 1.05, 3: 1.1, 4: 1.15, 5: 1.3 };
 
@@ -123,6 +161,7 @@ export default function InspectPage() {
   );
   const [extraPhotos, setExtraPhotos] = useState<{ file: File; preview: string }[]>([]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [buildingMeasurements, setBuildingMeasurements] = useState<BuildingMeasurements | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [repEmail, setRepEmail] = useState('');
@@ -255,14 +294,20 @@ export default function InspectPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setAnalysis(data.analysis);
+      if (data.buildingMeasurements) setBuildingMeasurements(data.buildingMeasurements);
       setStep('report');
-      // Auto-save report if logged in
+      // Auto-save report if logged in (with photo thumbnails)
       try {
+        const allFiles = [
+          ...photos.filter(p => p.file).map(p => p.file!),
+          ...extraPhotos.map(p => p.file),
+        ];
+        const thumbnails = await Promise.all(allFiles.map(f => fileToThumbnail(f)));
         const saveRes = await fetch('/api/reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote }),
+          body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote, photos: thumbnails }),
         });
         const saveData = await saveRes.json();
         if (saveData.id) setSavedReportId(saveData.id);
@@ -280,7 +325,7 @@ export default function InspectPage() {
       const res = await fetch('/api/roof/send-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repEmail, address, roofData, quote, analysis }),
+        body: JSON.stringify({ repEmail, address, roofData, quote, analysis, buildingMeasurements }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -559,23 +604,72 @@ export default function InspectPage() {
             )}
           </div>
 
+          {/* INSPECTION PHOTOS */}
+          {totalPhotos > 0 && (
+            <div className="card hover-section">
+              <h2 className="hover-section__title">📸 Inspection Photos</h2>
+              <div className="photo-gallery">
+                {photos.filter(p => p.preview).map((p, i) => (
+                  <div key={i} className="photo-gallery__item">
+                    <img src={p.preview!} alt={p.label} />
+                    <span className="photo-gallery__label">{p.label}</span>
+                  </div>
+                ))}
+                {extraPhotos.map((p, i) => (
+                  <div key={`extra-${i}`} className="photo-gallery__item">
+                    <img src={p.preview} alt={`Extra ${i + 1}`} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* SIDING SUMMARY */}
           <div className="card hover-section">
             <div className="hover-section__header">
               <h2 className="hover-section__title">Siding Summary</h2>
-              <span className="hover-section__badge" style={{ background: conditionColor(analysis.sidingCondition.rating) }}>
-                {analysis.sidingCondition.rating.toUpperCase()}
-              </span>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {buildingMeasurements?.measurementSource === 'satellite' && (
+                  <span className="hover-section__badge" style={{ background: '#2563eb', fontSize: '10px', padding: '3px 8px' }}>
+                    🛰️ SATELLITE MEASURED
+                  </span>
+                )}
+                <span className="hover-section__badge" style={{ background: conditionColor(analysis.sidingCondition.rating) }}>
+                  {analysis.sidingCondition.rating.toUpperCase()}
+                </span>
+              </div>
             </div>
+
+            {/* Building Dimensions (from satellite) */}
+            {buildingMeasurements && (
+              <div className="hover-measurement-grid" style={{ marginBottom: '12px' }}>
+                <div className="hover-measurement">
+                  <span className="hover-measurement__value">{buildingMeasurements.buildingLength}' × {buildingMeasurements.buildingWidth}'</span>
+                  <span className="hover-measurement__label">Building Dimensions</span>
+                </div>
+                <div className="hover-measurement">
+                  <span className="hover-measurement__value">{buildingMeasurements.footprintSqFt.toLocaleString()}</span>
+                  <span className="hover-measurement__label">Footprint (sq ft)</span>
+                </div>
+                <div className="hover-measurement">
+                  <span className="hover-measurement__value">{buildingMeasurements.buildingPerimeter}'</span>
+                  <span className="hover-measurement__label">Perimeter</span>
+                </div>
+                <div className="hover-measurement">
+                  <span className="hover-measurement__value">{buildingMeasurements.stories} × {buildingMeasurements.wallHeightPerStory}'</span>
+                  <span className="hover-measurement__label">Stories × Wall Height</span>
+                </div>
+              </div>
+            )}
 
             <div className="hover-measurement-grid">
               <div className="hover-measurement">
-                <span className="hover-measurement__value">{wallArea.toLocaleString()}</span>
-                <span className="hover-measurement__label">Total Facade (sq ft)</span>
+                <span className="hover-measurement__value">{(buildingMeasurements?.grossWallArea || wallArea).toLocaleString()}</span>
+                <span className="hover-measurement__label">Gross Wall Area (sq ft)</span>
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{openingsArea.toLocaleString()}</span>
-                <span className="hover-measurement__label">Openings (sq ft)</span>
+                <span className="hover-measurement__label">Openings ({buildingMeasurements?.openingsPercent || 18}%)</span>
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{netWallArea.toLocaleString()}</span>

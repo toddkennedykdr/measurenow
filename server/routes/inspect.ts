@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
+import { getBuildingInsights, calculateWallArea } from '../services/solar';
 
 export const inspectRouter = Router();
 
@@ -121,7 +122,35 @@ Use your best professional judgment for all estimates. If you cannot determine s
       return res.status(500).json({ error: 'AI analysis returned invalid format. Please try again.' });
     }
 
-    return res.json({ analysis });
+    // Calculate wall area from Solar API data instead of relying on AI estimate
+    let buildingMeasurements: any = null;
+    try {
+      const building = await getBuildingInsights(lat, lng);
+      if (building) {
+        const stories = analysis.estimatedStories || 2;
+        const wallCalc = calculateWallArea(building, stories);
+        buildingMeasurements = {
+          footprintSqFt: building.footprintSqFt,
+          buildingPerimeter: building.estimatedPerimeterFt,
+          buildingLength: building.estimatedLength,
+          buildingWidth: building.estimatedWidth,
+          stories,
+          wallHeightPerStory: 9,
+          grossWallArea: wallCalc.grossWallArea,
+          calculatedWallArea: wallCalc.netSidingArea,
+          openingsDeduction: wallCalc.openingsArea,
+          openingsPercent: 18,
+          measurementSource: 'satellite',
+        };
+        // Override AI's wall area estimate with calculated value
+        analysis.estimatedWallArea = wallCalc.netSidingArea;
+        analysis.estimatedOpeningsArea = wallCalc.openingsArea;
+      }
+    } catch (err: any) {
+      console.error('Solar wall calc error (non-fatal):', err.message);
+    }
+
+    return res.json({ analysis, buildingMeasurements });
   } catch (err: any) {
     console.error('Photo analysis error:', err.message || err);
     return res.status(500).json({ error: 'Failed to analyze photos. Please try again.' });
@@ -130,7 +159,7 @@ Use your best professional judgment for all estimates. If you cannot determine s
 
 inspectRouter.post('/send-report', async (req: Request, res: Response) => {
   try {
-    const { repEmail, address, roofData, quote, analysis } = req.body;
+    const { repEmail, address, roofData, quote, analysis, buildingMeasurements } = req.body;
     if (!address) return res.status(400).json({ error: 'Missing report data.' });
 
     const recipients = ['todd@kanddroofingnc.com'];
