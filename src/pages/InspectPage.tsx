@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
+import { JNModal } from '../components/JNModal';
+import { useAuth } from '../context/AuthContext';
 
 // Types
 interface PhotoSlot {
@@ -127,6 +129,9 @@ export default function InspectPage() {
   const [sendingReport, setSendingReport] = useState(false);
   const [reportSent, setReportSent] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [showJN, setShowJN] = useState(false);
+  const [savedReportId, setSavedReportId] = useState<number | null>(null);
+  const { user } = useAuth();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -251,6 +256,17 @@ export default function InspectPage() {
       if (!res.ok) throw new Error(data.error);
       setAnalysis(data.analysis);
       setStep('report');
+      // Auto-save report if logged in
+      try {
+        const saveRes = await fetch('/api/reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote }),
+        });
+        const saveData = await saveRes.json();
+        if (saveData.id) setSavedReportId(saveData.id);
+      } catch {}
     } catch (err: any) {
       setError(err.message || 'Analysis failed');
       setStep('photos');
@@ -536,6 +552,11 @@ export default function InspectPage() {
             <button className="btn btn--outline" onClick={() => window.print()}>
               🖨️ Print Report
             </button>
+            {user && (
+              <button className="btn btn--secondary" onClick={() => setShowJN(true)}>
+                📤 Send to JobNimbus
+              </button>
+            )}
           </div>
 
           {/* SIDING SUMMARY */}
@@ -821,6 +842,8 @@ export default function InspectPage() {
         </div>
         );
       })()}
+
+      {showJN && <JNModal address={address} reportRef={reportRef} onClose={() => setShowJN(false)} />}
 
       <footer className="footer">
         © {new Date().getFullYear()}{' '}

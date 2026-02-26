@@ -2,11 +2,18 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import session from 'express-session';
 import dotenv from 'dotenv';
 import path from 'path';
 import { roofRouter } from './routes/roof';
 import { leadRouter } from './routes/lead';
 import { inspectRouter } from './routes/inspect';
+import { authRouter } from './routes/auth';
+import { reportsRouter } from './routes/reports';
+import { jnRouter } from './routes/jobnimbus';
+
+// Initialize DB (creates tables + seeds)
+import './db';
 
 dotenv.config();
 
@@ -14,8 +21,20 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: '10mb' }));
+
+// Session
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'kd-measurenow-secret-2024',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: false, // set true behind HTTPS proxy
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  },
+}));
 
 // Rate limit: 30 requests per minute per IP
 app.use('/api', rateLimit({
@@ -26,6 +45,9 @@ app.use('/api', rateLimit({
   message: { error: 'Too many requests. Please try again in a minute.' },
 }));
 
+app.use('/api/auth', authRouter);
+app.use('/api/reports', reportsRouter);
+app.use('/api/jn', jnRouter);
 app.use('/api/roof', roofRouter);
 app.use('/api/roof', inspectRouter);
 app.use('/api/lead', leadRouter);
