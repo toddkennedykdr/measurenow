@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
-import OpenAI from 'openai';
 
 export const inspectRouter = Router();
 
@@ -29,7 +28,7 @@ inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Re
       return res.status(400).json({ error: 'Invalid coordinates.' });
     }
 
-    const imageContents: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
+    const imageContents: any[] = [];
     for (const file of files) {
       const resized = await sharp(file.buffer)
         .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
@@ -37,20 +36,12 @@ inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Re
         .toBuffer();
       const base64 = resized.toString('base64');
       imageContents.push({
-        type: 'image_url',
-        image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'high' },
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/jpeg', data: base64 },
       });
     }
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 3000,
-      messages: [
-        {
-          role: 'system',
-          content: `You are an expert roofing and siding inspector analyzing photos of a residential property. Analyze ALL provided photos and return ONLY valid JSON (no markdown, no code fences) with this exact structure:
+    const systemPrompt = `You are an expert roofing and siding inspector analyzing photos of a residential property. Analyze ALL provided photos and return ONLY valid JSON (no markdown, no code fences) with this exact structure:
 {
   "roofType": "gable|hip|flat|mansard|gambrel|shed|combination|other",
   "material": { "type": "asphalt shingle|metal|tile|slate|wood shake|flat/TPO|other", "condition": "good|fair|poor" },
@@ -68,19 +59,39 @@ inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Re
   "sidingRecommendations": ["recommendation 1", "recommendation 2"]
 }
 For estimatedWallArea, estimate total exterior wall sq ft based on visible walls, number of stories, and approximate building footprint. If the house is ~1500 sq ft footprint and 2 stories, walls are roughly 2400-3000 sq ft. Use your best judgment.
-If you cannot determine something, use reasonable defaults. Always provide the full structure.`,
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: `Analyze these ${files.length} photos of a property at ${address || `${lat}, ${lng}`}. Provide a detailed roofing AND siding inspection analysis.` },
-            ...imageContents,
-          ],
-        },
-      ],
+If you cannot determine something, use reasonable defaults. Always provide the full structure.`;
+
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 3000,
+        system: systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: `Analyze these ${files.length} photos of a property at ${address || `${lat}, ${lng}`}. Provide a detailed roofing AND siding inspection analysis.` },
+              ...imageContents,
+            ],
+          },
+        ],
+      }),
     });
 
-    const raw = completion.choices[0]?.message?.content || '{}';
+    if (!anthropicRes.ok) {
+      const errText = await anthropicRes.text();
+      console.error('Anthropic API error:', errText);
+      return res.status(500).json({ error: 'AI analysis failed. Please try again.' });
+    }
+
+    const anthropicData = await anthropicRes.json() as any;
+    const raw = anthropicData.content?.[0]?.text || '{}';
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 
     let analysis;
