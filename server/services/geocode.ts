@@ -16,7 +16,7 @@ export async function geocodeAddress(address: string): Promise<GeoLocation | nul
     throw new Error(`Geocoding API error: ${res.status}`);
   }
 
-  const data = await res.json();
+  const data: any = await res.json();
   if (data.status !== 'OK' || !data.results?.length) {
     return null;
   }

@@ -34,7 +34,7 @@ export async function getBuildingInsights(
       continue;
     }
 
-    const data = await res.json();
+    const data: any = await res.json();
     const solar = data.solarPotential;
     if (!solar?.roofSegmentStats?.length) continue;
 
