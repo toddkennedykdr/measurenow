@@ -41,6 +41,8 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           quoteHigh: quote.highEstimate,
           roofSqFt: roofData.totalAreaSqFt,
           roofSquares: quote.roofSquares,
+          avgPitchDegrees: quote.avgPitchDegrees,
+          pitchOver12: quote.pitchOver12,
         }),
       });
 

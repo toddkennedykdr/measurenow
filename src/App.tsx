@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { QuoteResponse, Step } from './types';
 import { AddressForm } from './components/AddressForm';
+import { ConfirmAddress } from './components/ConfirmAddress';
 import { QuoteResult } from './components/QuoteResult';
 import { ThankYou } from './components/ThankYou';
 
@@ -11,7 +12,16 @@ export default function App() {
 
   const handleQuoteReceived = (data: QuoteResponse) => {
     setQuoteData(data);
+    setStep('confirm');
+  };
+
+  const handleConfirmed = () => {
     setStep('quote');
+  };
+
+  const handleNotMyHome = () => {
+    setStep('address');
+    setQuoteData(null);
   };
 
   const handleLeadSubmitted = (name: string) => {
@@ -36,6 +46,10 @@ export default function App() {
 
       {step === 'address' && (
         <AddressForm onQuoteReceived={handleQuoteReceived} />
+      )}
+
+      {step === 'confirm' && quoteData && (
+        <ConfirmAddress data={quoteData} onConfirm={handleConfirmed} onReject={handleNotMyHome} />
       )}
 
       {step === 'quote' && quoteData && (

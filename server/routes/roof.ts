@@ -38,10 +38,14 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
     // Step 3: Calculate quote
     const quote = calculateQuote(building);
 
+    // Build Street View image URL
+    const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${location.lat},${location.lng}&key=${process.env.GOOGLE_SOLAR_API_KEY}`;
+
     return res.json({
       address: location.formattedAddress,
       lat: location.lat,
       lng: location.lng,
+      streetViewUrl,
       roofData: {
         totalAreaSqFt: Math.round(building.totalAreaSqFt),
         segments: building.segments.length,

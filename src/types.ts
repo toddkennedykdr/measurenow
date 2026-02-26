@@ -2,6 +2,7 @@ export interface QuoteResponse {
   address: string;
   lat: number;
   lng: number;
+  streetViewUrl: string;
   roofData: {
     totalAreaSqFt: number;
     segments: number;
@@ -16,8 +17,9 @@ export interface QuoteResponse {
     highEstimate: number;
     avgPitchDegrees: number;
     pitchCategory: string;
+    pitchOver12: number;
     materialNote: string;
   };
 }
 
-export type Step = 'address' | 'quote' | 'thankyou';
+export type Step = 'address' | 'confirm' | 'quote' | 'thankyou';
