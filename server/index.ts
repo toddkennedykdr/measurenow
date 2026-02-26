@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { roofRouter } from './routes/roof';
 import { leadRouter } from './routes/lead';
+import { inspectRouter } from './routes/inspect';
 
 dotenv.config();
 
@@ -14,7 +15,7 @@ const PORT = process.env.PORT || 3001;
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Rate limit: 30 requests per minute per IP
 app.use('/api', rateLimit({
@@ -26,6 +27,7 @@ app.use('/api', rateLimit({
 }));
 
 app.use('/api/roof', roofRouter);
+app.use('/api/roof', inspectRouter);
 app.use('/api/lead', leadRouter);
 
 // Serve static frontend in production

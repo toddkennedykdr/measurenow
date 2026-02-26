@@ -12,18 +12,23 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "express": "^4.21.0",
+    "@types/multer": "^2.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "helmet": "^7.1.0",
+    "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
-    "zod": "^3.23.8",
+    "helmet": "^7.1.0",
+    "multer": "^2.0.2",
+    "openai": "^6.25.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.13.1",
+    "sharp": "^0.34.5",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
