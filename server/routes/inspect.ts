@@ -45,7 +45,7 @@ inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Re
 {
   "roofType": "gable|hip|flat|mansard|gambrel|shed|combination|other",
   "material": { "type": "asphalt shingle|metal|tile|slate|wood shake|flat/TPO|other", "condition": "good|fair|poor" },
-  "features": [{ "type": "dormer|skylight|chimney|vent|pipe|satellite dish|gutter|valley|hip ridge|ridge", "count": 1, "location": "description" }],
+  "features": [{ "type": "dormer|skylight|chimney|vent|pipe|satellite dish|gutter|valley|hip ridge|ridge|rake|eave", "count": 1, "location": "description" }],
   "complexity": { "rating": 3, "explanation": "reason" },
   "damage": [{ "type": "missing shingles|cracking|moss/algae|sagging|flashing damage|storm damage|wear", "severity": "none|minor|major", "location": "description", "description": "details" }],
   "accessIssues": ["steep slope", "tall building", "trees close to roof", "power lines nearby"],
@@ -56,10 +56,29 @@ inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Re
   "sidingCondition": { "rating": "good|fair|poor", "notes": "description of siding condition" },
   "sidingDamage": [{ "type": "cracking|fading|warping|moisture damage|holes|loose panels|rot|peeling paint", "severity": "none|minor|major", "location": "description", "description": "details" }],
   "estimatedWallArea": 2000,
-  "sidingRecommendations": ["recommendation 1", "recommendation 2"]
+  "sidingRecommendations": ["recommendation 1", "recommendation 2"],
+  "estimatedOpeningsArea": 400,
+  "estimatedTrimLength": 200,
+  "estimatedRidgeLength": 40,
+  "estimatedValleyLength": 30,
+  "estimatedRakeLength": 80,
+  "estimatedEaveLength": 120,
+  "estimatedDripEdge": 200,
+  "estimatedCorners": { "inside": 4, "outside": 6 },
+  "estimatedFacets": 8
 }
-For estimatedWallArea, estimate total exterior wall sq ft based on visible walls, number of stories, and approximate building footprint. If the house is ~1500 sq ft footprint and 2 stories, walls are roughly 2400-3000 sq ft. Use your best judgment.
-If you cannot determine something, use reasonable defaults. Always provide the full structure.`;
+MEASUREMENT ESTIMATION GUIDELINES:
+- estimatedOpeningsArea: total sq ft of windows and doors visible on the exterior
+- estimatedTrimLength: total linear feet of exterior trim (around windows, doors, corners, fascia)
+- estimatedRidgeLength: total linear feet of roof ridges (main peak + any secondary ridges)
+- estimatedValleyLength: total linear feet of roof valleys
+- estimatedRakeLength: total linear feet of rakes (sloped edges of the roof at gable ends)
+- estimatedEaveLength: total linear feet of eaves (horizontal edges of the roof)
+- estimatedDripEdge: total linear feet of drip edge (perimeter of roof — typically rakes + eaves)
+- estimatedCorners: count of inside and outside corners on the building exterior
+- estimatedFacets: total number of distinct roof planes/faces
+- estimatedWallArea: total exterior wall sq ft based on visible walls, stories, and approximate footprint. For a ~1500 sq ft footprint 2-story house, walls are roughly 2400-3000 sq ft.
+Use your best professional judgment for all estimates. If you cannot determine something, use reasonable defaults. Always provide the full structure.`;
 
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -153,42 +172,126 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
       .map((r: string) => `<li>${r}</li>`)
       .join('');
 
+    const roofArea = roofData?.totalAreaSqFt || 0;
+    const roofSquares = quote?.roofSquares || 0;
+    const openingsArea = analysis?.estimatedOpeningsArea || 0;
+    const netWallArea = wallArea - openingsArea;
+    const ridgeLen = analysis?.estimatedRidgeLength || 0;
+    const valleyLen = analysis?.estimatedValleyLength || 0;
+    const rakeLen = analysis?.estimatedRakeLength || 0;
+    const eaveLen = analysis?.estimatedEaveLength || 0;
+    const dripEdge = analysis?.estimatedDripEdge || (rakeLen + eaveLen);
+    const facets = analysis?.estimatedFacets || roofData?.segments || 0;
+    const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const thStyle = 'background:#032D59;color:white;padding:8px 12px;text-align:left;font-size:12px;text-transform:uppercase';
+    const tdStyle = 'padding:8px 12px;border-bottom:1px solid #e5e7eb';
+
+    const roofWasteRows = [0, 0.05, 0.10, 0.15, 0.20].map(pct => {
+      const a = Math.round(roofArea * (1 + pct));
+      const label = pct === 0 ? 'Zero Waste' : `+${Math.round(pct * 100)}%`;
+      return `<tr><td style="${tdStyle}">${label}</td><td style="${tdStyle}">${a.toLocaleString()}</td><td style="${tdStyle}">${(a / 100).toFixed(1)}</td></tr>`;
+    }).join('');
+
+    const sidingWasteRows = [0, 0.10, 0.18].map(pct => {
+      const a = Math.round(netWallArea * (1 + pct));
+      const label = pct === 0 ? 'Zero Waste' : `+${Math.round(pct * 100)}%`;
+      return `<tr><td style="${tdStyle}">${label}</td><td style="${tdStyle}">${a.toLocaleString()}</td><td style="${tdStyle}">${(a / 100).toFixed(1)}</td></tr>`;
+    }).join('');
+
+    const condColor = (r: string) => r === 'poor' ? '#E2312B' : r === 'fair' ? '#ca8a04' : '#16a34a';
+
     const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-        <h1 style="color:#032D59">K&D Roofing — Inspection Report</h1>
-        <h2 style="color:#6b7280">📍 ${address}</h2>
-        <hr/>
-        <h3>Satellite Measurements</h3>
-        <ul>
-          <li>Roof Area: ${roofData?.totalAreaSqFt?.toLocaleString() || 'N/A'} sq ft</li>
-          <li>Squares: ${quote?.roofSquares || 'N/A'}</li>
-          <li>Pitch: ${quote?.pitchOver12 || 'N/A'}/12 (${quote?.pitchCategory || ''})</li>
-        </ul>
-        <h3>🏠 Roof — AI Analysis</h3>
-        <p><strong>Roof Type:</strong> ${analysis?.roofType || 'N/A'}</p>
-        <p><strong>Material:</strong> ${analysis?.material?.type || 'N/A'} (${analysis?.material?.condition || 'N/A'})</p>
-        <p><strong>Overall Condition:</strong> ${analysis?.overallCondition?.rating || 'N/A'} — ${analysis?.overallCondition?.notes || ''}</p>
-        <p><strong>Complexity:</strong> ${analysis?.complexity?.rating || 'N/A'}/5 — ${analysis?.complexity?.explanation || ''}</p>
-        <p><strong>Stories:</strong> ${analysis?.estimatedStories || 'N/A'}</p>
-        <h4>Features</h4><ul>${featuresHtml || '<li>None detected</li>'}</ul>
-        <h4>Roof Damage</h4><ul>${damageHtml || '<li>No damage detected</li>'}</ul>
-        <h4>Roof Recommendations</h4><ul>${recsHtml || '<li>None</li>'}</ul>
-        <hr/>
-        <h3>🧱 Siding — AI Analysis</h3>
-        <p><strong>Material:</strong> ${analysis?.sidingMaterial || 'N/A'}</p>
-        <p><strong>Condition:</strong> ${analysis?.sidingCondition?.rating || 'N/A'} — ${analysis?.sidingCondition?.notes || ''}</p>
-        <p><strong>Est. Wall Area:</strong> ~${wallArea.toLocaleString()} sq ft (${wallSquares.toFixed(1)} squares)</p>
-        <h4>Siding Damage</h4><ul>${sidingDamageHtml || '<li>No damage detected</li>'}</ul>
-        <h4>Siding Recommendations</h4><ul>${sidingRecsHtml || '<li>None</li>'}</ul>
-        <hr/>
-        <h3 style="color:#032D59">Quote Summary</h3>
-        <table style="width:100%;border-collapse:collapse;font-size:16px">
-          <tr><td style="padding:8px 0"><strong>Roof Replacement</strong> (${mult}x complexity)</td><td style="text-align:right;font-weight:bold;color:#032D59">$${adjLow.toLocaleString()} – $${adjHigh.toLocaleString()}</td></tr>
-          <tr><td style="padding:8px 0"><strong>Siding (${sidingLabel})</strong></td><td style="text-align:right;font-weight:bold;color:#032D59">$${sidingLow.toLocaleString()} – $${sidingHigh.toLocaleString()}</td></tr>
-          <tr style="border-top:2px solid #032D59"><td style="padding:12px 0;font-size:18px"><strong>Total (Roof + Siding)</strong></td><td style="text-align:right;font-weight:bold;color:#E2312B;font-size:18px">$${(adjLow + sidingLow).toLocaleString()} – $${(adjHigh + sidingHigh).toLocaleString()}</td></tr>
-        </table>
-        <hr/>
-        <p style="color:#6b7280;font-size:12px">Generated by K&D Roofing MeasureNow Inspection Tool</p>
+      <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;color:#374151">
+        <!-- HEADER -->
+        <div style="background:#032D59;color:white;padding:24px;border-radius:8px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <div style="font-size:24px;font-weight:800">K&D <span style="color:#E2312B">Roofing</span></div>
+              <div style="font-size:14px;opacity:0.8">Complete Property Measurements</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:15px;font-weight:600">${address}</div>
+              <div style="font-size:13px;opacity:0.7">${reportDate}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SIDING SUMMARY -->
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h2 style="color:#032D59;margin:0;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px">Siding Summary</h2>
+            <span style="background:${condColor(analysis?.sidingCondition?.rating || 'fair')};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${(analysis?.sidingCondition?.rating || 'N/A').toUpperCase()}</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
+            <tr><td style="padding:6px 0;width:50%"><strong>Total Facade:</strong> ${wallArea.toLocaleString()} sq ft</td><td><strong>Openings:</strong> ${openingsArea.toLocaleString()} sq ft</td></tr>
+            <tr><td style="padding:6px 0"><strong>Net Siding:</strong> ${netWallArea.toLocaleString()} sq ft</td><td><strong>Material:</strong> ${analysis?.sidingMaterial || 'N/A'}</td></tr>
+          </table>
+          ${analysis?.estimatedCorners ? `<p style="font-size:13px;color:#6b7280;margin:4px 0">Corners — Inside: ${analysis.estimatedCorners.inside} · Outside: ${analysis.estimatedCorners.outside}${analysis?.estimatedTrimLength ? ` · Trim: ~${analysis.estimatedTrimLength} lin ft` : ''}</p>` : ''}
+          <p style="font-size:14px;background:#f9fafb;border-left:3px solid #d1d5db;padding:8px 12px;border-radius:4px">${analysis?.sidingCondition?.notes || ''}</p>
+          ${sidingDamageHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Siding Damage</h4><ul style="margin:0;padding-left:20px;font-size:14px">${sidingDamageHtml}</ul>` : ''}
+          <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:16px 0 6px">Waste Factor</h4>
+          <table style="width:100%;border-collapse:collapse;font-size:14px">
+            <tr><th style="${thStyle}">Factor</th><th style="${thStyle}">Area (sq ft)</th><th style="${thStyle}">Squares</th></tr>
+            ${sidingWasteRows}
+          </table>
+        </div>
+
+        <!-- ROOF SUMMARY -->
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h2 style="color:#032D59;margin:0;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px">Roof Summary</h2>
+            <span style="background:${condColor(analysis?.overallCondition?.rating || 'fair')};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${(analysis?.overallCondition?.rating || 'N/A').toUpperCase()}</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
+            <tr><td style="padding:6px 0;width:33%"><strong>Area:</strong> ${roofArea.toLocaleString()} sq ft</td><td style="width:33%"><strong>Squares:</strong> ${roofSquares}</td><td><strong>Facets:</strong> ${facets}</td></tr>
+            <tr><td style="padding:6px 0"><strong>Type:</strong> ${analysis?.roofType || 'N/A'}</td><td><strong>Material:</strong> ${analysis?.material?.type || 'N/A'}</td><td><strong>Pitch:</strong> ${quote?.pitchOver12 || 'N/A'}/12</td></tr>
+          </table>
+
+          <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Roof Components</h4>
+          <table style="width:100%;border-collapse:collapse;font-size:14px">
+            <tr><th style="${thStyle}">Component</th><th style="${thStyle}">Est. Length (ft)</th></tr>
+            <tr><td style="${tdStyle}">Ridges / Hips</td><td style="${tdStyle}">${ridgeLen || '—'}</td></tr>
+            <tr><td style="${tdStyle}">Valleys</td><td style="${tdStyle}">${valleyLen || '—'}</td></tr>
+            <tr><td style="${tdStyle}">Rakes</td><td style="${tdStyle}">${rakeLen || '—'}</td></tr>
+            <tr><td style="${tdStyle}">Eaves</td><td style="${tdStyle}">${eaveLen || '—'}</td></tr>
+            <tr><td style="${tdStyle}">Drip Edge / Perimeter</td><td style="${tdStyle}">${dripEdge || '—'}</td></tr>
+          </table>
+
+          ${featuresHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Features</h4><ul style="margin:0;padding-left:20px;font-size:14px">${featuresHtml}</ul>` : ''}
+
+          <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:16px 0 6px">Waste Factor</h4>
+          <table style="width:100%;border-collapse:collapse;font-size:14px">
+            <tr><th style="${thStyle}">Factor</th><th style="${thStyle}">Area (sq ft)</th><th style="${thStyle}">Squares</th></tr>
+            ${roofWasteRows}
+          </table>
+        </div>
+
+        <!-- AI INSPECTION NOTES -->
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
+          <h2 style="color:#032D59;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px;margin-bottom:12px">AI Inspection Notes</h2>
+          <div style="background:#f9fafb;padding:12px;border-radius:8px;display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <span style="background:${condColor(analysis?.overallCondition?.rating || 'fair')};color:white;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:700">${(analysis?.overallCondition?.rating || 'N/A').toUpperCase()}</span>
+            <span style="font-size:14px">${analysis?.overallCondition?.notes || ''}</span>
+          </div>
+          <p style="font-size:14px"><strong>Complexity:</strong> ${analysis?.complexity?.rating || 'N/A'}/5 — ${analysis?.complexity?.explanation || ''}</p>
+          ${damageHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Damage Findings</h4><ul style="margin:0;padding-left:20px;font-size:14px">${damageHtml}</ul>` : ''}
+          ${recsHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${recsHtml}</ul>` : ''}
+          ${sidingRecsHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Siding Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${sidingRecsHtml}</ul>` : ''}
+        </div>
+
+        <!-- QUOTE SUMMARY -->
+        <div style="background:white;border:2px solid #032D59;border-radius:8px;padding:20px;margin-bottom:16px">
+          <h2 style="color:#032D59;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px;margin-bottom:12px">Quote Summary</h2>
+          <table style="width:100%;border-collapse:collapse;font-size:16px">
+            <tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb"><strong>Roof Replacement</strong> <span style="color:#6b7280;font-size:12px">(${analysis?.material?.type || ''} · ${mult}x complexity)</span></td><td style="text-align:right;font-weight:bold;color:#032D59;border-bottom:1px solid #e5e7eb">$${adjLow.toLocaleString()} – $${adjHigh.toLocaleString()}</td></tr>
+            ${wallArea > 0 ? `<tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb"><strong>Siding</strong> <span style="color:#6b7280;font-size:12px">(${sidingLabel})</span></td><td style="text-align:right;font-weight:bold;color:#032D59;border-bottom:1px solid #e5e7eb">$${sidingLow.toLocaleString()} – $${sidingHigh.toLocaleString()}</td></tr>` : ''}
+            <tr style="border-top:2px solid #032D59"><td style="padding:14px 0;font-size:18px;font-weight:700;color:#032D59">Total Estimated</td><td style="text-align:right;font-weight:800;color:#E2312B;font-size:22px">$${(adjLow + sidingLow).toLocaleString()} – $${(adjHigh + sidingHigh).toLocaleString()}</td></tr>
+          </table>
+          <p style="font-size:12px;color:#6b7280;font-style:italic;margin:8px 0 0">*Estimates based on satellite data + AI photo analysis. Final pricing subject to on-site confirmation.</p>
+        </div>
+
+        <p style="color:#6b7280;font-size:12px;text-align:center">Generated by K&D Roofing MeasureNow Inspection Tool · ${reportDate}</p>
       </div>
     `;
 

@@ -860,3 +860,405 @@ body {
     text-align: left;
   }
 }
+
+/* =============================================
+   HOVER-STYLE REPORT
+   ============================================= */
+
+.hover-report {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.hover-header {
+  background: var(--navy);
+  color: white;
+  padding: 24px;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hover-header__logo {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.hover-header__logo span {
+  color: var(--red);
+}
+
+.hover-header__tagline {
+  font-size: 14px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+.hover-header__meta {
+  text-align: right;
+}
+
+.hover-header__address {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.hover-header__date {
+  font-size: 13px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+.hover-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  justify-content: flex-end;
+}
+
+.hover-section {
+  margin-bottom: 16px;
+}
+
+.hover-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.hover-section__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--navy);
+  margin: 0 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--navy);
+}
+
+.hover-section__header .hover-section__title {
+  margin-bottom: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.hover-section__badge {
+  padding: 4px 12px;
+  border-radius: 20px;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hover-measurement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.hover-measurement {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.hover-measurement__value {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--navy);
+  line-height: 1.2;
+}
+
+.hover-measurement__label {
+  display: block;
+  font-size: 11px;
+  color: var(--gray-500);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.hover-detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--gray-700);
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.hover-condition-note {
+  font-size: 14px;
+  color: var(--gray-700);
+  margin: 8px 0 16px;
+  padding: 8px 12px;
+  background: var(--gray-50);
+  border-left: 3px solid var(--gray-300);
+  border-radius: 4px;
+}
+
+.hover-table-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navy);
+  margin: 20px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hover-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.hover-table th {
+  background: var(--navy);
+  color: white;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.hover-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.hover-table tbody tr:nth-child(even) {
+  background: var(--gray-50);
+}
+
+.hover-table tbody tr:hover {
+  background: rgba(3, 45, 89, 0.04);
+}
+
+.hover-pitch-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.hover-pitch-value {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.hover-pitch-label {
+  font-size: 14px;
+  color: var(--gray-500);
+}
+
+.hover-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.hover-feature-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--gray-100);
+  border: 1px solid var(--gray-200);
+  border-radius: 16px;
+  font-size: 13px;
+  color: var(--gray-700);
+}
+
+.hover-feature-badge--warn {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.hover-condition-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--gray-50);
+  border-radius: 8px;
+}
+
+.hover-condition-badge {
+  padding: 6px 14px;
+  border-radius: 20px;
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.hover-condition-text {
+  font-size: 14px;
+  color: var(--gray-700);
+}
+
+.hover-complexity {
+  margin-bottom: 16px;
+}
+
+.hover-complexity__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.hover-complexity__bar {
+  display: flex;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.hover-complexity__segment {
+  width: 40px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--gray-200);
+}
+
+.hover-complexity__segment--active {
+  background: var(--navy);
+}
+
+.hover-complexity__text {
+  font-size: 13px;
+  color: var(--gray-500);
+}
+
+.hover-damage-list {
+  margin-bottom: 12px;
+}
+
+.hover-damage-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.hover-damage-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.hover-damage-sev {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hover-damage-desc {
+  font-size: 13px;
+  color: var(--gray-500);
+  margin-top: 2px;
+}
+
+.hover-recs {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+  color: var(--gray-700);
+}
+
+.hover-recs li {
+  padding: 4px 0;
+}
+
+.hover-quote-section {
+  border: 2px solid var(--navy);
+}
+
+.hover-quote-table {
+  margin-bottom: 12px;
+}
+
+.hover-quote-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 15px;
+}
+
+.hover-quote-row small {
+  color: var(--gray-500);
+  font-size: 12px;
+}
+
+.hover-quote-row strong {
+  color: var(--navy);
+  font-size: 16px;
+}
+
+.hover-quote-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0 4px;
+  border-top: 2px solid var(--navy);
+  margin-top: 4px;
+}
+
+.hover-quote-total span {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.hover-quote-total strong {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--red);
+}
+
+.hover-quote-disclaimer {
+  font-size: 12px;
+  color: var(--gray-500);
+  font-style: italic;
+  margin: 0;
+}
+
+/* PRINT STYLES */
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .inspect-page { padding: 0; }
+  .inspect-header, .footer, .navbar { display: none; }
+  .hover-report { max-width: 100%; }
+  .hover-header { break-after: avoid; }
+  .card { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+  .hover-table th { background: #032D59 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hover-section__badge, .hover-condition-badge, .hover-damage-dot, .hover-complexity__segment--active {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

@@ -43,6 +43,15 @@ interface Analysis {
   sidingDamage: { type: string; severity: string; location: string; description: string }[];
   estimatedWallArea: number;
   sidingRecommendations: string[];
+  estimatedOpeningsArea?: number;
+  estimatedTrimLength?: number;
+  estimatedRidgeLength?: number;
+  estimatedValleyLength?: number;
+  estimatedRakeLength?: number;
+  estimatedEaveLength?: number;
+  estimatedDripEdge?: number;
+  estimatedCorners?: { inside: number; outside: number };
+  estimatedFacets?: number;
 }
 
 type Step = 'address' | 'confirm' | 'satellite' | 'photos' | 'analyzing' | 'report';
@@ -452,210 +461,303 @@ export default function InspectPage() {
       )}
 
       {/* STEP: Report */}
-      {step === 'report' && analysis && (
-        <div className="inspect-report">
-          {/* Address */}
-          <div className="card">
-            <p className="inspect-report__address">📍 {address}</p>
+      {step === 'report' && analysis && (() => {
+        const roofArea = roofData?.totalAreaSqFt || 0;
+        const roofSquares = quote?.roofSquares || 0;
+        const facets = analysis.estimatedFacets || roofData?.segments || 0;
+        const ridgeLen = analysis.estimatedRidgeLength || 0;
+        const valleyLen = analysis.estimatedValleyLength || 0;
+        const rakeLen = analysis.estimatedRakeLength || 0;
+        const eaveLen = analysis.estimatedEaveLength || 0;
+        const dripEdge = analysis.estimatedDripEdge || (rakeLen + eaveLen);
+        const openingsArea = analysis.estimatedOpeningsArea || 0;
+        const netWallArea = wallArea - openingsArea;
+        const ridgeCount = analysis.features.filter(f => f.type.toLowerCase().includes('ridge') || f.type.toLowerCase().includes('hip')).reduce((s, f) => s + f.count, 0);
+        const valleyCount = analysis.features.filter(f => f.type.toLowerCase().includes('valley')).reduce((s, f) => s + f.count, 0);
+        const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-            {/* Quote Summary */}
-            <div className="inspect-report__quote-block">
-              <div className="inspect-report__quote-row">
-                <span>Roof Replacement</span>
-                <strong>{formatPrice(adjLow)} – {formatPrice(adjHigh)}</strong>
-              </div>
-              {wallArea > 0 && (
-                <div className="inspect-report__quote-row">
-                  <span>Siding ({sidingPricing.label})</span>
-                  <strong>{formatPrice(sidingLow)} – {formatPrice(sidingHigh)}</strong>
-                </div>
-              )}
-              <div className="inspect-report__quote-total">
-                <span>Total (Roof + Siding)</span>
-                <strong>{formatPrice(adjLow + sidingLow)} – {formatPrice(adjHigh + sidingHigh)}</strong>
-              </div>
+        const roofWaste = [
+          { label: 'Zero Waste', pct: 0 },
+          { label: '+5%', pct: 0.05 },
+          { label: '+10%', pct: 0.10 },
+          { label: '+15%', pct: 0.15 },
+          { label: '+20%', pct: 0.20 },
+        ];
+        const sidingWaste = [
+          { label: 'Zero Waste', pct: 0 },
+          { label: '+10%', pct: 0.10 },
+          { label: '+18%', pct: 0.18 },
+        ];
+
+        return (
+        <div className="inspect-report hover-report" id="printable-report">
+          {/* Property Header */}
+          <div className="hover-header">
+            <div className="hover-header__brand">
+              <div className="hover-header__logo">K&D <span>Roofing</span></div>
+              <div className="hover-header__tagline">Complete Property Measurements</div>
+            </div>
+            <div className="hover-header__meta">
+              <div className="hover-header__address">{address}</div>
+              <div className="hover-header__date">{reportDate}</div>
             </div>
           </div>
 
-          {/* Satellite Data */}
-          {roofData && quote && (
-            <div className="card">
-              <h3 className="inspect-section-title">🛰️ Satellite Measurements</h3>
-              <div className="quote-stats">
-                <div className="quote-stat">
-                  <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
-                  <span className="quote-stat__label">Sq Ft</span>
-                </div>
-                <div className="quote-stat">
-                  <span className="quote-stat__value">{quote.roofSquares}</span>
-                  <span className="quote-stat__label">Squares</span>
-                </div>
-                <div className="quote-stat">
-                  <span className="quote-stat__value">{quote.pitchOver12}/12</span>
-                  <span className="quote-stat__label">{quote.pitchCategory} Pitch</span>
-                </div>
-                <div className="quote-stat">
-                  <span className="quote-stat__value">{roofData.segments}</span>
-                  <span className="quote-stat__label">Segments</span>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Print Button */}
+          <div className="hover-actions no-print">
+            <button className="btn btn--primary" onClick={() => window.print()}>
+              🖨️ Print Report
+            </button>
+          </div>
 
-          {/* Roof Analysis */}
-          <div className="card">
-            <h3 className="inspect-section-title">🏠 Roof Analysis</h3>
-            <div className="inspect-detail-grid">
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Type</span>
-                <span className="inspect-detail__value">{analysis.roofType}</span>
+          {/* SIDING SUMMARY */}
+          <div className="card hover-section">
+            <div className="hover-section__header">
+              <h2 className="hover-section__title">Siding Summary</h2>
+              <span className="hover-section__badge" style={{ background: conditionColor(analysis.sidingCondition.rating) }}>
+                {analysis.sidingCondition.rating.toUpperCase()}
+              </span>
+            </div>
+
+            <div className="hover-measurement-grid">
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{wallArea.toLocaleString()}</span>
+                <span className="hover-measurement__label">Total Facade (sq ft)</span>
               </div>
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Material</span>
-                <span className="inspect-detail__value">{analysis.material.type}</span>
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{openingsArea.toLocaleString()}</span>
+                <span className="hover-measurement__label">Openings (sq ft)</span>
               </div>
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Condition</span>
-                <span className="inspect-detail__value" style={{ color: conditionColor(analysis.material.condition) }}>
-                  {analysis.material.condition}
-                </span>
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{netWallArea.toLocaleString()}</span>
+                <span className="hover-measurement__label">Net Siding (sq ft)</span>
               </div>
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Stories</span>
-                <span className="inspect-detail__value">{analysis.estimatedStories}</span>
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{analysis.sidingMaterial}</span>
+                <span className="hover-measurement__label">Material</span>
               </div>
             </div>
 
-            {/* Complexity Meter */}
-            <div className="inspect-complexity">
-              <span className="inspect-complexity__label">Complexity</span>
-              <div className="inspect-complexity__meter">
-                {[1, 2, 3, 4, 5].map(n => (
-                  <div
-                    key={n}
-                    className={`inspect-complexity__dot ${n <= complexityRating ? 'inspect-complexity__dot--active' : ''}`}
-                    style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }}
-                  />
+            {analysis.estimatedCorners && (
+              <div className="hover-detail-row">
+                <span>Corners — Inside: {analysis.estimatedCorners.inside} · Outside: {analysis.estimatedCorners.outside}</span>
+                {analysis.estimatedTrimLength ? <span>Trim: ~{analysis.estimatedTrimLength} lin ft</span> : null}
+              </div>
+            )}
+
+            <p className="hover-condition-note">{analysis.sidingCondition.notes}</p>
+
+            {analysis.sidingDamage.length > 0 && (
+              <div className="hover-damage-list">
+                {analysis.sidingDamage.map((d, i) => (
+                  <div key={i} className="hover-damage-item">
+                    <span className="hover-damage-dot" style={{ background: severityColor(d.severity) }} />
+                    <div>
+                      <strong>{d.type}</strong> <span className="hover-damage-sev" style={{ color: severityColor(d.severity) }}>({d.severity})</span>
+                      <div className="hover-damage-desc">{d.description} — {d.location}</div>
+                    </div>
+                  </div>
                 ))}
               </div>
-              <span className="inspect-complexity__text">{complexityRating}/5 — {analysis.complexity.explanation}</span>
-            </div>
+            )}
 
-            {/* Overall Condition */}
-            <div className="inspect-condition">
-              <span className="inspect-condition__badge" style={{ background: conditionColor(analysis.overallCondition.rating) }}>
+            {/* Siding Waste Table */}
+            <h4 className="hover-table-title">Siding Waste Factor</h4>
+            <table className="hover-table">
+              <thead>
+                <tr><th>Factor</th><th>Area (sq ft)</th><th>Squares</th></tr>
+              </thead>
+              <tbody>
+                {sidingWaste.map(w => {
+                  const a = Math.round(netWallArea * (1 + w.pct));
+                  return (
+                    <tr key={w.label}><td>{w.label}</td><td>{a.toLocaleString()}</td><td>{(a / 100).toFixed(1)}</td></tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ROOF SUMMARY */}
+          <div className="card hover-section">
+            <div className="hover-section__header">
+              <h2 className="hover-section__title">Roof Summary</h2>
+              <span className="hover-section__badge" style={{ background: conditionColor(analysis.overallCondition.rating) }}>
                 {analysis.overallCondition.rating.toUpperCase()}
               </span>
-              <span>{analysis.overallCondition.notes}</span>
+            </div>
+
+            <div className="hover-measurement-grid">
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{roofArea.toLocaleString()}</span>
+                <span className="hover-measurement__label">Total Roof Area (sq ft)</span>
+              </div>
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{roofSquares}</span>
+                <span className="hover-measurement__label">Squares</span>
+              </div>
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{facets}</span>
+                <span className="hover-measurement__label">Facets</span>
+              </div>
+              <div className="hover-measurement">
+                <span className="hover-measurement__value">{analysis.roofType}</span>
+                <span className="hover-measurement__label">Roof Type</span>
+              </div>
+            </div>
+
+            {/* Line Items */}
+            <h4 className="hover-table-title">Roof Components</h4>
+            <table className="hover-table">
+              <thead>
+                <tr><th>Component</th><th>Count</th><th>Est. Length (ft)</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Ridges / Hips</td><td>{ridgeCount || '—'}</td><td>{ridgeLen || '—'}</td></tr>
+                <tr><td>Valleys</td><td>{valleyCount || '—'}</td><td>{valleyLen || '—'}</td></tr>
+                <tr><td>Rakes</td><td>—</td><td>{rakeLen || '—'}</td></tr>
+                <tr><td>Eaves</td><td>—</td><td>{eaveLen || '—'}</td></tr>
+                <tr><td>Drip Edge / Perimeter</td><td>—</td><td>{dripEdge || '—'}</td></tr>
+              </tbody>
+            </table>
+
+            {/* Pitch */}
+            <h4 className="hover-table-title">Pitch</h4>
+            <div className="hover-pitch-display">
+              <span className="hover-pitch-value">{quote?.pitchOver12 || '—'}/12</span>
+              <span className="hover-pitch-label">{quote?.pitchCategory || ''} — {quote?.avgPitchDegrees?.toFixed(1) || '—'}°</span>
             </div>
 
             {/* Features */}
             {analysis.features.length > 0 && (
-              <div className="inspect-features">
-                <h4 className="inspect-subsection">Features Detected</h4>
-                <div className="inspect-badges">
+              <>
+                <h4 className="hover-table-title">Features Detected</h4>
+                <div className="hover-badges">
                   {analysis.features.map((f, i) => (
-                    <span key={i} className="inspect-badge">
-                      {f.type} ×{f.count}
+                    <span key={i} className="hover-feature-badge">
+                      {f.type} <strong>×{f.count}</strong>
                     </span>
                   ))}
                 </div>
-              </div>
+              </>
             )}
 
-            {/* Damage */}
-            {analysis.damage.length > 0 && (
-              <div className="inspect-damage">
-                <h4 className="inspect-subsection">Damage</h4>
-                {analysis.damage.map((d, i) => (
-                  <div key={i} className="inspect-damage-item">
-                    <span className="inspect-damage-severity" style={{ color: severityColor(d.severity) }}>
-                      ● {d.severity}
-                    </span>
-                    <strong>{d.type}</strong> — {d.description}
-                    <span className="inspect-damage-loc">{d.location}</span>
-                  </div>
+            {/* Roof Waste Table */}
+            <h4 className="hover-table-title">Roof Waste Factor</h4>
+            <table className="hover-table">
+              <thead>
+                <tr><th>Factor</th><th>Area (sq ft)</th><th>Squares</th></tr>
+              </thead>
+              <tbody>
+                {roofWaste.map(w => {
+                  const a = Math.round(roofArea * (1 + w.pct));
+                  return (
+                    <tr key={w.label}><td>{w.label}</td><td>{a.toLocaleString()}</td><td>{(a / 100).toFixed(1)}</td></tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* AI INSPECTION NOTES */}
+          <div className="card hover-section">
+            <h2 className="hover-section__title">AI Inspection Notes</h2>
+
+            {/* Overall Condition */}
+            <div className="hover-condition-block">
+              <span className="hover-condition-badge" style={{ background: conditionColor(analysis.overallCondition.rating) }}>
+                {analysis.overallCondition.rating.toUpperCase()}
+              </span>
+              <span className="hover-condition-text">{analysis.overallCondition.notes}</span>
+            </div>
+
+            {/* Complexity */}
+            <div className="hover-complexity">
+              <span className="hover-complexity__label">Complexity Rating</span>
+              <div className="hover-complexity__bar">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`}
+                    style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }} />
                 ))}
               </div>
+              <span className="hover-complexity__text">{complexityRating}/5 — {analysis.complexity.explanation}</span>
+            </div>
+
+            {/* Damage Findings */}
+            {analysis.damage.length > 0 && (
+              <>
+                <h4 className="hover-table-title">Roof Damage Findings</h4>
+                <div className="hover-damage-list">
+                  {analysis.damage.map((d, i) => (
+                    <div key={i} className="hover-damage-item">
+                      <span className="hover-damage-dot" style={{ background: severityColor(d.severity) }} />
+                      <div>
+                        <strong>{d.type}</strong> <span className="hover-damage-sev" style={{ color: severityColor(d.severity) }}>({d.severity})</span>
+                        <div className="hover-damage-desc">{d.description} — {d.location}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
 
             {/* Access Issues */}
             {analysis.accessIssues.length > 0 && (
-              <div>
-                <h4 className="inspect-subsection">⚠️ Access Issues</h4>
-                <div className="inspect-badges">
+              <>
+                <h4 className="hover-table-title">⚠️ Access Issues</h4>
+                <div className="hover-badges">
                   {analysis.accessIssues.map((a, i) => (
-                    <span key={i} className="inspect-badge inspect-badge--warn">{a}</span>
+                    <span key={i} className="hover-feature-badge hover-feature-badge--warn">{a}</span>
                   ))}
                 </div>
-              </div>
+              </>
             )}
 
             {/* Recommendations */}
             {analysis.recommendations.length > 0 && (
-              <div>
-                <h4 className="inspect-subsection">Recommendations</h4>
-                <ul className="inspect-recs">
+              <>
+                <h4 className="hover-table-title">Recommendations</h4>
+                <ul className="hover-recs">
                   {analysis.recommendations.map((r, i) => <li key={i}>{r}</li>)}
                 </ul>
-              </div>
-            )}
-          </div>
-
-          {/* Siding Analysis */}
-          <div className="card">
-            <h3 className="inspect-section-title">🧱 Siding Analysis</h3>
-            <div className="inspect-detail-grid">
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Material</span>
-                <span className="inspect-detail__value">{analysis.sidingMaterial}</span>
-              </div>
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Condition</span>
-                <span className="inspect-detail__value" style={{ color: conditionColor(analysis.sidingCondition.rating) }}>
-                  {analysis.sidingCondition.rating}
-                </span>
-              </div>
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Est. Wall Area</span>
-                <span className="inspect-detail__value">~{wallArea.toLocaleString()} sq ft</span>
-              </div>
-              <div className="inspect-detail">
-                <span className="inspect-detail__label">Wall Squares</span>
-                <span className="inspect-detail__value">{wallSquares.toFixed(1)}</span>
-              </div>
-            </div>
-
-            <p className="inspect-siding-notes">{analysis.sidingCondition.notes}</p>
-
-            {analysis.sidingDamage.length > 0 && (
-              <div className="inspect-damage">
-                <h4 className="inspect-subsection">Siding Damage</h4>
-                {analysis.sidingDamage.map((d, i) => (
-                  <div key={i} className="inspect-damage-item">
-                    <span className="inspect-damage-severity" style={{ color: severityColor(d.severity) }}>
-                      ● {d.severity}
-                    </span>
-                    <strong>{d.type}</strong> — {d.description}
-                    <span className="inspect-damage-loc">{d.location}</span>
-                  </div>
-                ))}
-              </div>
+              </>
             )}
 
             {analysis.sidingRecommendations.length > 0 && (
-              <div>
-                <h4 className="inspect-subsection">Siding Recommendations</h4>
-                <ul className="inspect-recs">
+              <>
+                <h4 className="hover-table-title">Siding Recommendations</h4>
+                <ul className="hover-recs">
                   {analysis.sidingRecommendations.map((r, i) => <li key={i}>{r}</li>)}
                 </ul>
-              </div>
+              </>
             )}
           </div>
 
+          {/* QUOTE SUMMARY */}
+          <div className="card hover-section hover-quote-section">
+            <h2 className="hover-section__title">Quote Summary</h2>
+            <div className="hover-quote-table">
+              <div className="hover-quote-row">
+                <span>Roof Replacement <small>({analysis.material.type} · {complexityRating}/5 complexity)</small></span>
+                <strong>{formatPrice(adjLow)} – {formatPrice(adjHigh)}</strong>
+              </div>
+              {wallArea > 0 && (
+                <div className="hover-quote-row">
+                  <span>Siding <small>({sidingPricing.label})</small></span>
+                  <strong>{formatPrice(sidingLow)} – {formatPrice(sidingHigh)}</strong>
+                </div>
+              )}
+              <div className="hover-quote-total">
+                <span>Total Estimated</span>
+                <strong>{formatPrice(adjLow + sidingLow)} – {formatPrice(adjHigh + sidingHigh)}</strong>
+              </div>
+            </div>
+            <p className="hover-quote-disclaimer">*Estimates based on satellite data + AI photo analysis. Final pricing subject to on-site confirmation.</p>
+          </div>
+
           {/* Send Report */}
-          <div className="card">
-            <h3 className="inspect-section-title">📧 Send Report</h3>
+          <div className="card hover-section no-print">
+            <h3 className="hover-section__title">📧 Send Report</h3>
             {reportSent ? (
               <div className="inspect-report-sent">
                 <span className="inspect-report-sent__icon">✅</span>
@@ -683,13 +785,14 @@ export default function InspectPage() {
           </div>
 
           {/* Start New */}
-          <div style={{ textAlign: 'center', padding: '16px 0' }}>
+          <div className="no-print" style={{ textAlign: 'center', padding: '16px 0' }}>
             <button className="btn btn--outline" onClick={() => window.location.reload()}>
               Start New Inspection
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <footer className="footer">
         © {new Date().getFullYear()}{' '}
