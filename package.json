@@ -18,6 +18,7 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
     "helmet": "^7.1.0",
+    "html2pdf.js": "^0.14.0",
     "multer": "^2.0.2",
     "openai": "^6.25.0",
     "react": "^18.3.1",

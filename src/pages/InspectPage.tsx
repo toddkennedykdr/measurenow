@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 
 // Types
@@ -126,8 +126,10 @@ export default function InspectPage() {
   const [repEmail, setRepEmail] = useState('');
   const [sendingReport, setSendingReport] = useState(false);
   const [reportSent, setReportSent] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const mapRef = useRef<HTMLDivElement>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   // Auto-geocode if address param provided
   useEffect(() => {
@@ -271,6 +273,29 @@ export default function InspectPage() {
       setError(err.message || 'Failed to send report');
     } finally {
       setSendingReport(false);
+    }
+  };
+
+  // Download PDF
+  const handleDownloadPdf = async () => {
+    const el = reportRef.current;
+    if (!el) return;
+    setPdfBusy(true);
+    try {
+      const html2pdf = (await import('html2pdf.js')).default;
+      const shortAddr = address.replace(/,?\s*(USA?|United States)$/i, '').trim().replace(/[^a-zA-Z0-9]+/g, '-');
+      await html2pdf().from(el).set({
+        margin: 0.4,
+        filename: `KD-Roofing-Inspection-${shortAddr}.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      }).save();
+    } catch (err) {
+      console.error('PDF generation failed', err);
+    } finally {
+      setPdfBusy(false);
     }
   };
 
@@ -490,7 +515,7 @@ export default function InspectPage() {
         ];
 
         return (
-        <div className="inspect-report hover-report" id="printable-report">
+        <div className="inspect-report hover-report" id="printable-report" ref={reportRef}>
           {/* Property Header */}
           <div className="hover-header">
             <div className="hover-header__brand">
@@ -503,9 +528,12 @@ export default function InspectPage() {
             </div>
           </div>
 
-          {/* Print Button */}
+          {/* Report Actions */}
           <div className="hover-actions no-print">
-            <button className="btn btn--primary" onClick={() => window.print()}>
+            <button className="btn btn--primary" onClick={handleDownloadPdf} disabled={pdfBusy}>
+              {pdfBusy ? '⏳ Generating...' : '📄 Download PDF'}
+            </button>
+            <button className="btn btn--outline" onClick={() => window.print()}>
               🖨️ Print Report
             </button>
           </div>
