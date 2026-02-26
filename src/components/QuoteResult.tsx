@@ -78,7 +78,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
             <span className="quote-stat__label">Squares</span>
           </div>
           <div className="quote-stat">
-            <span className="quote-stat__value">{quote.avgPitchDegrees}°</span>
+            <span className="quote-stat__value">{quote.pitchOver12}/12</span>
             <span className="quote-stat__label">{quote.pitchCategory} Pitch</span>
           </div>
         </div>

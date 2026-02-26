@@ -7,6 +7,7 @@ export interface RoofQuote {
   lowEstimate: number;
   highEstimate: number;
   avgPitchDegrees: number;
+  pitchOver12: number;
   pitchCategory: string;
   materialNote: string;
 }
@@ -32,6 +33,9 @@ export function calculateQuote(building: BuildingRoofData): RoofQuote {
   if (building.avgPitch > STEEP_PITCH_THRESHOLD) pitchCategory = 'Steep';
   else if (building.avgPitch < 10) pitchCategory = 'Low';
 
+  // Convert degrees to X/12 pitch format
+  const pitchOver12 = Math.round(Math.tan(building.avgPitch * Math.PI / 180) * 12 * 10) / 10;
+
   return {
     roofSquares: Math.round(roofSquares * 10) / 10,
     totalAreaSqFt: Math.round(building.totalAreaSqFt),
@@ -39,6 +43,7 @@ export function calculateQuote(building: BuildingRoofData): RoofQuote {
     lowEstimate,
     highEstimate,
     avgPitchDegrees: Math.round(building.avgPitch * 10) / 10,
+    pitchOver12,
     pitchCategory,
     materialNote: 'Architectural shingles (30-year warranty), includes tear-off, underlayment, and cleanup',
   };
