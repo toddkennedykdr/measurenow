@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { NavBar } from './components/NavBar';
 import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
@@ -50,6 +51,7 @@ export default function App() {
 
   return (
     <div className="widget">
+      <NavBar />
       <header className="header">
         <div className="header__logo">
           K&amp;D <span>Roofing</span>

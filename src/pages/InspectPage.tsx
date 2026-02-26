@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { NavBar } from '../components/NavBar';
 
 // Types
 interface PhotoSlot {
@@ -279,9 +280,9 @@ export default function InspectPage() {
 
   return (
     <div className="inspect-page">
+      <NavBar />
       <header className="inspect-header">
         <div className="inspect-header__top">
-          <Link to="/" className="inspect-header__back">← Quote Tool</Link>
           <div className="header__logo">K&amp;D <span>Roofing</span></div>
         </div>
         <div className="inspect-header__title">🔍 Roof & Siding Inspection</div>
