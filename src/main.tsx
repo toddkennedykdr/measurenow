@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import HomePage from './pages/HomePage';
 import App from './App';
 import InspectPage from './pages/InspectPage';
 import LoginPage from './pages/LoginPage';
@@ -14,7 +15,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<App />} />
+          <Route path="/" element={<HomePage />} />
+          <Route path="/quote" element={<App />} />
           <Route path="/inspect" element={<InspectPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/reports" element={<ReportsPage />} />

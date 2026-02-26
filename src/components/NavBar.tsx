@@ -35,9 +35,18 @@ export function NavBar() {
       padding: 0,
       fontFamily: 'Inter, system-ui, sans-serif',
     }}>
-      <Link to="/" style={linkStyle(path === '/')}>⚡ Quote</Link>
-      <Link to="/inspect" style={linkStyle(path === '/inspect')}>🔍 Inspect</Link>
-      {user && <Link to="/reports" style={linkStyle(path.startsWith('/reports'))}>📋 Reports</Link>}
+      {user ? (
+        <>
+          <Link to="/" style={linkStyle(path === '/')}>🏠 Dashboard</Link>
+          <Link to="/quote" style={linkStyle(path === '/quote')}>⚡ Quote</Link>
+          <Link to="/inspect" style={linkStyle(path === '/inspect')}>🔍 Inspect</Link>
+        </>
+      ) : (
+        <>
+          <Link to="/" style={linkStyle(path === '/' || path === '/quote')}>⚡ Instant Quote</Link>
+          <Link to="/inspect" style={linkStyle(path === '/inspect')}>🔍 Inspection Tool</Link>
+        </>
+      )}
       <div style={{ flex: 1 }} />
       {user ? (
         <button onClick={handleLogout} style={{ ...linkStyle(false), border: 'none', cursor: 'pointer', background: 'transparent', fontSize: '12px', opacity: 0.7 }}>

@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { NavBar } from './components/NavBar';
 import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
@@ -80,10 +79,6 @@ export default function App() {
       {step === 'thankyou' && quoteData && (
         <ThankYou name={leadName} data={quoteData} onStartOver={handleStartOver} />
       )}
-
-      <div style={{ textAlign: 'center', marginTop: 8 }}>
-        <Link to="/inspect" className="nav-link">🔍 Rep Inspection Tool →</Link>
-      </div>
 
       <footer className="footer">
         © {new Date().getFullYear()}{' '}
