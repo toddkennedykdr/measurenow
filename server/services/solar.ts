@@ -27,10 +27,14 @@ export function calculateWallArea(
   building: BuildingRoofData,
   stories: number = 2,
   wallHeightPerStory: number = 9,
-  openingsPercent: number = 0.18
+  openingsPercent: number = 0.15
 ) {
   const totalWallHeight = stories * wallHeightPerStory;
-  const grossWallArea = Math.round(building.estimatedPerimeterFt * totalWallHeight);
+  // Add gable end area: triangular area above wall plate on gabled ends
+  // Estimate: ~8% of gross wall area for typical gable contributions
+  const baseWallArea = building.estimatedPerimeterFt * totalWallHeight;
+  const gableArea = baseWallArea * 0.08;
+  const grossWallArea = Math.round(baseWallArea + gableArea);
   const openingsArea = Math.round(grossWallArea * openingsPercent);
   const netSidingArea = grossWallArea - openingsArea;
   return { grossWallArea, netSidingArea, openingsArea, totalWallHeight };
@@ -103,7 +107,12 @@ export async function getBuildingInsights(
     // For footprint area A and aspect ratio r: length = sqrt(A * r), width = sqrt(A / r)
     const estimatedLength = Math.sqrt(footprintSqFt * aspectRatio);
     const estimatedWidth = Math.sqrt(footprintSqFt / aspectRatio);
-    const estimatedPerimeterFt = 2 * (estimatedLength + estimatedWidth);
+    // Base rectangular perimeter, then apply complexity factor.
+    // Real houses (L-shapes, bump-outs, porches, garages) have 20-40% more perimeter
+    // than a simple rectangle of the same area. Use 1.30 as default multiplier.
+    const basePerimeter = 2 * (estimatedLength + estimatedWidth);
+    const complexityMultiplier = 1.30;
+    const estimatedPerimeterFt = basePerimeter * complexityMultiplier;
 
     return {
       totalAreaSqFt,
