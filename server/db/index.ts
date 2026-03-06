@@ -34,12 +34,18 @@ export async function initDb() {
     );
   `);
 
-  // Seed user if not exists
-  const existing = await db.select().from(schema.users).where(eq(schema.users.username, 'Todd')).limit(1);
-  if (!existing[0]) {
-    const hash = bcrypt.hashSync('demo123', 10);
-    await db.insert(schema.users).values({ username: 'Todd', passwordHash: hash, name: 'Todd Kennedy' });
-    console.log('Seeded user: Todd');
+  // Seed users if not exists
+  const seedUsers = [
+    { username: 'Todd', password: 'demo123', name: 'Todd Kennedy' },
+    { username: 'Isaac', password: 'kd2026!', name: 'Isaac Klick' },
+  ];
+  for (const u of seedUsers) {
+    const existing = await db.select().from(schema.users).where(eq(schema.users.username, u.username)).limit(1);
+    if (!existing[0]) {
+      const hash = bcrypt.hashSync(u.password, 10);
+      await db.insert(schema.users).values({ username: u.username, passwordHash: hash, name: u.name });
+      console.log(`Seeded user: ${u.username}`);
+    }
   }
 }
 
