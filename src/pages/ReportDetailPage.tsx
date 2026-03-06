@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
+import { RoofDiagram } from '../components/RoofDiagram';
 import { useAuth } from '../context/AuthContext';
 
 function formatPrice(n: number) { return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }); }
@@ -109,6 +110,9 @@ export default function ReportDetailPage() {
             </div>
           </div>
         )}
+
+        {/* Roof & Elevation Diagrams */}
+        <RoofDiagram roofData={roofData} analysis={analysis} />
 
         {/* Roof Summary */}
         <div className="card hover-section">

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
+import { RoofDiagram } from '../components/RoofDiagram';
 import { useAuth } from '../context/AuthContext';
 
 // Types
@@ -472,7 +473,6 @@ export default function InspectPage() {
                   <input
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     className="photo-slot__input"
                     onChange={e => {
                       const f = e.target.files?.[0];
@@ -492,7 +492,6 @@ export default function InspectPage() {
               <input
                 type="file"
                 accept="image/*"
-                capture="environment"
                 multiple
                 className="photo-slot__input"
                 onChange={e => {
@@ -623,6 +622,9 @@ export default function InspectPage() {
               </div>
             </div>
           )}
+
+          {/* ROOF & ELEVATION DIAGRAMS */}
+          <RoofDiagram roofData={roofData} analysis={analysis} />
 
           {/* SIDING SUMMARY */}
           <div className="card hover-section">

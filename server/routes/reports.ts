@@ -11,12 +11,12 @@ function requireAuth(req: Request, res: Response, next: any) {
 }
 
 // Save report
-reportsRouter.post('/', requireAuth, (req: Request, res: Response) => {
+reportsRouter.post('/', requireAuth, async (req: Request, res: Response) => {
   const userId = (req.session as any).userId;
   const { address, lat, lng, roofData, analysis, quote, photos } = req.body;
   if (!address) return res.status(400).json({ error: 'Address required' });
 
-  const result = db.insert(schema.reports).values({
+  const result = await db.insert(schema.reports).values({
     userId,
     address,
     lat: lat || null,
@@ -25,28 +25,28 @@ reportsRouter.post('/', requireAuth, (req: Request, res: Response) => {
     analysis: analysis || null,
     quote: quote || null,
     photos: photos || null,
-  }).run();
+  }).returning({ id: schema.reports.id });
 
-  return res.json({ id: result.lastInsertRowid, success: true });
+  return res.json({ id: result[0].id, success: true });
 });
 
 // List reports
-reportsRouter.get('/', requireAuth, (req: Request, res: Response) => {
+reportsRouter.get('/', requireAuth, async (req: Request, res: Response) => {
   const userId = (req.session as any).userId;
-  const rows = db.select().from(schema.reports)
+  const rows = await db.select().from(schema.reports)
     .where(eq(schema.reports.userId, userId))
-    .orderBy(desc(schema.reports.createdAt))
-    .all();
+    .orderBy(desc(schema.reports.createdAt));
   return res.json(rows);
 });
 
 // Get single report
-reportsRouter.get('/:id', requireAuth, (req: Request, res: Response) => {
+reportsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
   const userId = (req.session as any).userId;
   const id = parseInt(req.params.id);
-  const report = db.select().from(schema.reports)
+  const rows = await db.select().from(schema.reports)
     .where(eq(schema.reports.id, id))
-    .get();
+    .limit(1);
+  const report = rows[0];
   if (!report || report.userId !== userId) return res.status(404).json({ error: 'Report not found' });
   return res.json(report);
 });

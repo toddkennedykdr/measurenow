@@ -12,10 +12,9 @@ import { authRouter } from './routes/auth';
 import { reportsRouter } from './routes/reports';
 import { jnRouter } from './routes/jobnimbus';
 
-// Initialize DB (creates tables + seeds)
-import './db';
-
 dotenv.config();
+
+import { initDb } from './db';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -60,8 +59,12 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`MeasureNow server running on port ${PORT}`);
-});
+async function start() {
+  await initDb();
+  app.listen(PORT, () => {
+    console.log(`MeasureNow server running on port ${PORT}`);
+  });
+}
+start().catch(err => { console.error('Failed to start:', err); process.exit(1); });
 
 export default app;
