@@ -19,15 +19,33 @@ function conditionColor(c: string) {
 
 export default function DashboardPage() {
   const [reports, setReports] = useState<Report[]>([]);
+  const [allReports, setAllReports] = useState<(Report & { userName?: string; username?: string })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [tab, setTab] = useState<'mine' | 'all'>('mine');
 
   useEffect(() => {
+    // Check if admin
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => r.json())
+      .then(u => { if (u.isAdmin) setIsAdmin(true); })
+      .catch(() => {});
+
     fetch('/api/reports', { credentials: 'include' })
       .then(r => r.json())
       .then(setReports)
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (isAdmin && tab === 'all' && allReports.length === 0) {
+      fetch('/api/reports/admin/all', { credentials: 'include' })
+        .then(r => r.json())
+        .then(setAllReports)
+        .catch(console.error);
+    }
+  }, [isAdmin, tab]);
 
   return (
     <div className="inspect-page">
@@ -87,28 +105,54 @@ export default function DashboardPage() {
 
       {/* My Reports */}
       <div style={{ padding: '0 16px 24px' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 16,
-        }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#032D59' }}>📋 My Reports</h2>
-          {!loading && (
-            <span style={{
-              background: '#e5e7eb',
-              color: '#374151',
-              padding: '2px 10px',
-              borderRadius: 12,
-              fontSize: 12,
-              fontWeight: 600,
-            }}>{reports.length}</span>
-          )}
-        </div>
+        {isAdmin && (
+          <div style={{
+            display: 'flex',
+            gap: 0,
+            marginBottom: 16,
+            borderRadius: 8,
+            overflow: 'hidden',
+            border: '2px solid #032D59',
+          }}>
+            <button onClick={() => setTab('mine')} style={{
+              flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer',
+              fontWeight: 700, fontSize: 14,
+              background: tab === 'mine' ? '#032D59' : 'white',
+              color: tab === 'mine' ? 'white' : '#032D59',
+            }}>📋 My Reports ({reports.length})</button>
+            <button onClick={() => setTab('all')} style={{
+              flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer',
+              fontWeight: 700, fontSize: 14,
+              background: tab === 'all' ? '#032D59' : 'white',
+              color: tab === 'all' ? 'white' : '#032D59',
+            }}>👥 All Reports ({allReports.length})</button>
+          </div>
+        )}
+
+        {!isAdmin && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 16,
+          }}>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#032D59' }}>📋 My Reports</h2>
+            {!loading && (
+              <span style={{
+                background: '#e5e7eb',
+                color: '#374151',
+                padding: '2px 10px',
+                borderRadius: 12,
+                fontSize: 12,
+                fontWeight: 600,
+              }}>{reports.length}</span>
+            )}
+          </div>
+        )}
 
         {loading ? (
           <div className="card" style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>Loading reports...</div>
-        ) : reports.length === 0 ? (
+        ) : (tab === 'mine' ? reports : allReports).length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: 48 }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📄</div>
             <p style={{ fontSize: 16, color: '#6b7280', margin: '0 0 16px' }}>No reports yet. Run your first inspection!</p>
@@ -122,7 +166,7 @@ export default function DashboardPage() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
             gap: 12,
           }}>
-            {reports.map(r => {
+            {(tab === 'mine' ? reports : allReports).map(r => {
               const analysis = typeof r.analysis === 'string' ? JSON.parse(r.analysis) : r.analysis;
               const condition = analysis?.overallCondition?.rating || 'N/A';
               const date = new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -153,6 +197,13 @@ export default function DashboardPage() {
                     </div>
                     {r.customerName && (
                       <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{r.address}</div>
+                    )}
+                    {tab === 'all' && (r as any).userName && (
+                      <div style={{
+                        fontSize: 11, color: '#032D59', fontWeight: 600,
+                        background: '#e0e7ff', padding: '1px 8px', borderRadius: 8,
+                        display: 'inline-block', marginBottom: 2,
+                      }}>👤 {(r as any).userName}</div>
                     )}
                     <div style={{ fontSize: 12, color: '#9ca3af' }}>{date}</div>
                   </div>

@@ -17,7 +17,8 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
   (req.session as any).userId = user.id;
   (req.session as any).userName = user.name;
-  return res.json({ id: user.id, name: user.name, username: user.username });
+  (req.session as any).isAdmin = user.isAdmin;
+  return res.json({ id: user.id, name: user.name, username: user.username, isAdmin: user.isAdmin });
 });
 
 authRouter.post('/logout', (req: Request, res: Response) => {
@@ -31,5 +32,5 @@ authRouter.get('/me', async (req: Request, res: Response) => {
   const rows = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
   const user = rows[0];
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
-  return res.json({ id: user.id, name: user.name, username: user.username });
+  return res.json({ id: user.id, name: user.name, username: user.username, isAdmin: user.isAdmin });
 });
