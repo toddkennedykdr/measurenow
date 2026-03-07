@@ -43,6 +43,7 @@ export async function initDb() {
   const seedUsers = [
     { username: 'Todd', password: 'demo123', name: 'Todd Kennedy', isAdmin: true },
     { username: 'Isaac', password: 'kd2026!', name: 'Isaac Klick', isAdmin: false },
+    { username: 'Rob', password: 'kd2026!', name: 'Robert Copp', isAdmin: false },
   ];
   for (const u of seedUsers) {
     const existing = await db.select().from(schema.users).where(eq(schema.users.username, u.username)).limit(1);
