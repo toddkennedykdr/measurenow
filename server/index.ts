@@ -11,13 +11,24 @@ import { inspectRouter } from './routes/inspect';
 import { authRouter } from './routes/auth';
 import { reportsRouter } from './routes/reports';
 import { jnRouter } from './routes/jobnimbus';
+import { requireRoofAccess, roofRateLimit } from './middleware/roofAccess';
 
 dotenv.config();
 
 import { initDb } from './db';
 
+const sessionSecret = process.env.SESSION_SECRET;
+if (typeof sessionSecret !== 'string' || sessionSecret.trim() === '') {
+  console.error('Fatal: SESSION_SECRET is not set. Refusing to start.');
+  process.exit(1);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Railway terminates TLS and forwards the client IP. Trust that one hop
+// so per-IP rate limits see the visitor, not the proxy.
+app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
@@ -25,7 +36,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // Session
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'kd-measurenow-secret-2024',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -47,6 +58,7 @@ app.use('/api', rateLimit({
 app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/jn', jnRouter);
+app.use('/api/roof', roofRateLimit, requireRoofAccess);
 app.use('/api/roof', roofRouter);
 app.use('/api/roof', inspectRouter);
 app.use('/api/lead', leadRouter);

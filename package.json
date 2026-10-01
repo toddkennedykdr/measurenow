@@ -8,6 +8,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
+    "test": "tsx --test server/middleware/roofAccess.test.ts",
     "start": "node dist-server/index.js",
     "preview": "vite preview"
   },
