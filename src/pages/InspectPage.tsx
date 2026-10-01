@@ -193,6 +193,7 @@ export default function InspectPage() {
       const res = await fetch('/api/roof/geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ address: address.trim() }),
       });
       const data = await res.json();
@@ -214,7 +215,7 @@ export default function InspectPage() {
   // Init map
   const initMap = useCallback(async () => {
     try {
-      const res = await fetch('/api/roof/maps-key');
+      const res = await fetch('/api/roof/maps-key', { credentials: 'include' });
       const { key } = await res.json();
       await loadGoogleMaps(key);
       if (!mapRef.current) return;
@@ -246,6 +247,7 @@ export default function InspectPage() {
       const res = await fetch('/api/roof/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ lat: useLat, lng: useLng }),
       });
       const data = await res.json();
@@ -291,7 +293,7 @@ export default function InspectPage() {
       formData.append('lng', lng.toString());
       formData.append('address', address);
 
-      const res = await fetch('/api/roof/analyze-photos', { method: 'POST', body: formData });
+      const res = await fetch('/api/roof/analyze-photos', { method: 'POST', credentials: 'include', body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setAnalysis(data.analysis);
@@ -326,6 +328,7 @@ export default function InspectPage() {
       const res = await fetch('/api/roof/send-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ repEmail, address, roofData, quote, analysis, buildingMeasurements }),
       });
       const data = await res.json();

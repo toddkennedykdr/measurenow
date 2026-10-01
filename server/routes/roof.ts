@@ -6,9 +6,9 @@ import { calculateQuote, type RoofQuote } from '../services/pricing';
 
 export const roofRouter = Router();
 
-// Expose API key for Google Maps JavaScript API on the frontend
+// Browser-restricted Maps JavaScript API key. Never the Solar server key.
 roofRouter.get('/maps-key', (_req: Request, res: Response) => {
-  res.json({ key: process.env.GOOGLE_SOLAR_API_KEY || '' });
+  res.json({ key: process.env.GOOGLE_MAPS_BROWSER_KEY || '' });
 });
 
 const addressSchema = z.object({
