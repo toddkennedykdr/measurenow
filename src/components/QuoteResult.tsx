@@ -132,7 +132,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
             id="phone"
             type="tel"
             className="input"
-            placeholder="(919) 555-1234"
+            placeholder="Your phone number"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             disabled={loading}
