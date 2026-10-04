@@ -15,12 +15,18 @@ import { jnRouter } from './routes/jobnimbus';
 dotenv.config();
 
 import { initDb } from './db';
+import { corsOptionsDelegate, blockForeignOrigins } from './middleware/security';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Railway terminates TLS at one edge proxy hop. Trust exactly that hop so req.ip is the
+// real client IP (used by the rate limiters). Never `true` (that would trust spoofed XFF).
+app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
+
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ credentials: true, origin: true }));
+// CORS: only our own origins (prod Railway domain, ALLOWED_ORIGINS, localhost in dev).
+app.use(cors(corsOptionsDelegate));
 app.use(express.json({ limit: '10mb' }));
 
 // Session
@@ -31,11 +37,15 @@ app.use(session({
   cookie: {
     secure: false, // set true behind HTTPS proxy
     httpOnly: true,
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   },
 }));
 
-// Rate limit: 30 requests per minute per IP
+// Browser requests from foreign origins are refused outright.
+app.use('/api', blockForeignOrigins);
+
+// Rate limit: 30 requests per minute per IP (now keyed on the real client IP via trust proxy)
 app.use('/api', rateLimit({
   windowMs: 60_000,
   max: 30,
@@ -51,6 +61,11 @@ app.use('/api/roof', roofRouter);
 app.use('/api/roof', inspectRouter);
 app.use('/api/lead', leadRouter);
 
+// Unknown API paths: JSON 404 (never the SPA shell)
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 // Serve static frontend in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '..', 'dist')));
@@ -60,6 +75,11 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 async function start() {
+  if (process.env.SKIP_DB_INIT === '1') {
+    // Local smoke tests only: boot without Postgres.
+    app.listen(PORT, () => console.log(`MeasureNow server (no DB) running on port ${PORT}`));
+    return;
+  }
   await initDb();
   app.listen(PORT, () => {
     console.log(`MeasureNow server running on port ${PORT}`);

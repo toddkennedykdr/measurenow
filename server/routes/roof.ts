@@ -3,10 +3,13 @@ import { z } from 'zod';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote, type RoofQuote } from '../services/pricing';
+import { perIpLimit, dailyCap } from '../middleware/security';
 
 export const roofRouter = Router();
 
-// Expose API key for Google Maps JavaScript API on the frontend
+// Expose API key for Google Maps JavaScript API on the frontend.
+// Stays public: the public homeowner flow needs it (src/components/ConfirmAddress.tsx:60).
+// Protection is GCP-side (referrer + API restrictions on a browser-only key).
 roofRouter.get('/maps-key', (_req: Request, res: Response) => {
   res.json({ key: process.env.GOOGLE_SOLAR_API_KEY || '' });
 });
@@ -20,8 +23,14 @@ const quoteSchema = z.object({
   lng: z.number(),
 });
 
+// Public paid endpoints: per-IP limit (staff exempt) + daily global cap (fails closed with 429).
+const geocodeIpLimit = perIpLimit('geocode', 60 * 60_000, 20);
+const quoteIpLimit = perIpLimit('quote', 60 * 60_000, 20);
+const geocodeCap = dailyCap('geocode', 150, 500);
+const quoteCap = dailyCap('quote', 150, 500);
+
 // Step 1: Geocode only — returns lat/lng and formatted address
-roofRouter.post('/geocode', async (req: Request, res: Response) => {
+roofRouter.post('/geocode', geocodeIpLimit, geocodeCap, async (req: Request, res: Response) => {
   try {
     const parsed = addressSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -47,7 +56,7 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
 });
 
 // Step 2: Get quote using confirmed lat/lng
-roofRouter.post('/quote', async (req: Request, res: Response) => {
+roofRouter.post('/quote', quoteIpLimit, quoteCap, async (req: Request, res: Response) => {
   try {
     const parsed = quoteSchema.safeParse(req.body);
     if (!parsed.success) {

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { getBuildingInsights, calculateWallArea } from '../services/solar';
+import { requireAuth, dailyCap, deepEscape } from '../middleware/security';
 
 export const inspectRouter = Router();
 
@@ -14,7 +15,8 @@ const upload = multer({
   },
 });
 
-inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Request, res: Response) => {
+// Staff only (rep inspection tool). Auth runs BEFORE multer so anonymous uploads are never buffered.
+inspectRouter.post('/analyze-photos', requireAuth, dailyCap('analyze-photos', 0, 100), upload.array('photos', 12), async (req: Request, res: Response) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length < 4) {
@@ -157,13 +159,28 @@ Use your best professional judgment for all estimates. If you cannot determine s
   }
 });
 
-inspectRouter.post('/send-report', async (req: Request, res: Response) => {
+// Allowed recipient domains for the optional rep copy (comma list; default kanddroofingnc.com).
+function repEmailAllowed(email: string): boolean {
+  const domains = (process.env.REPORT_EMAIL_DOMAINS || 'kanddroofingnc.com')
+    .split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+  const m = /^[^\s@<>]+@([^\s@<>]+)$/.exec(email.trim().toLowerCase());
+  return !!m && domains.includes(m[1]);
+}
+
+// Staff only: no longer an open relay. Rep copy limited to company domain; all caller strings HTML-escaped.
+inspectRouter.post('/send-report', requireAuth, dailyCap('send-report', 0, 100), async (req: Request, res: Response) => {
   try {
-    const { repEmail, address, roofData, quote, analysis, buildingMeasurements } = req.body;
+    const { repEmail: rawRepEmail } = req.body;
+    const { address, roofData, quote, analysis, buildingMeasurements } = deepEscape(req.body || {});
     if (!address) return res.status(400).json({ error: 'Missing report data.' });
 
     const recipients = ['todd@kanddroofingnc.com'];
-    if (repEmail) recipients.push(repEmail);
+    if (rawRepEmail) {
+      if (typeof rawRepEmail !== 'string' || !repEmailAllowed(rawRepEmail)) {
+        return res.status(400).json({ error: 'Rep email must be a company address.' });
+      }
+      recipients.push(rawRepEmail.trim());
+    }
 
     const complexityMultipliers: Record<number, number> = { 1: 1.0, 2: 1.05, 3: 1.1, 4: 1.15, 5: 1.3 };
     const mult = complexityMultipliers[analysis?.complexity?.rating || 3] || 1.1;
@@ -333,7 +350,7 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
       body: JSON.stringify({
         from: 'K&D Roofing <admin@kanddroofingnc.com>',
         to: recipients,
-        subject: `Roof & Siding Inspection — ${address}`,
+        subject: `Roof & Siding Inspection — ${String(req.body.address).slice(0, 200)}`,
         html,
       }),
     });
