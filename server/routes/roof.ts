@@ -7,11 +7,28 @@ import { perIpLimit, dailyCap } from '../middleware/security';
 
 export const roofRouter = Router();
 
-// Expose API key for Google Maps JavaScript API on the frontend.
-// Stays public: the public homeowner flow needs it (src/components/ConfirmAddress.tsx:60).
-// Protection is GCP-side (referrer + API restrictions on a browser-only key).
+// Public Maps JS key. Prefer GOOGLE_MAPS_BROWSER_KEY. Fall back to
+// GOOGLE_SOLAR_API_KEY only while the browser key is unset, so deploys
+// keep working before that env var is set. Stays public: the homeowner
+// flow needs it (src/components/ConfirmAddress.tsx). Protection is GCP-side
+// (referrer + API restrictions on the browser key).
+function mapsJsApiKey(): string {
+  const browserKey = process.env.GOOGLE_MAPS_BROWSER_KEY;
+  if (browserKey) return browserKey;
+  return process.env.GOOGLE_SOLAR_API_KEY || '';
+}
+
+function mapsJsKeyEnvName(): 'GOOGLE_MAPS_BROWSER_KEY' | 'GOOGLE_SOLAR_API_KEY' {
+  return process.env.GOOGLE_MAPS_BROWSER_KEY ? 'GOOGLE_MAPS_BROWSER_KEY' : 'GOOGLE_SOLAR_API_KEY';
+}
+
+// Once at boot, after the importer has run dotenv.config(). Names only, never values.
+process.nextTick(() => {
+  console.log(`Maps JS key source: ${mapsJsKeyEnvName()}`);
+});
+
 roofRouter.get('/maps-key', (_req: Request, res: Response) => {
-  res.json({ key: process.env.GOOGLE_SOLAR_API_KEY || '' });
+  res.json({ key: mapsJsApiKey() });
 });
 
 const addressSchema = z.object({
