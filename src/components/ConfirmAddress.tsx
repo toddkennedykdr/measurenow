@@ -15,9 +15,10 @@ interface Props {
 }
 
 /**
- * NOTE: The Google Maps JavaScript API must be enabled for your API key.
- * Go to https://console.cloud.google.com/apis/library/maps-backend.googleapis.com
- * and enable "Maps JavaScript API" for the project associated with GOOGLE_SOLAR_API_KEY.
+ * NOTE: Maps JS is loaded with GOOGLE_MAPS_BROWSER_KEY from GET /api/roof/maps-key
+ * (falls back to GOOGLE_SOLAR_API_KEY only when that browser key is unset).
+ * Enable "Maps JavaScript API" for that key at
+ * https://console.cloud.google.com/apis/library/maps-backend.googleapis.com
  */
 
 // Load the Google Maps script once globally

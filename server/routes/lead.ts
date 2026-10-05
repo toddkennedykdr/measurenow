@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { requireAuth, perIpLimit, dailyCap, deepEscape } from '../middleware/security';
 
 export const leadRouter = Router();
 
@@ -19,7 +20,8 @@ const leadSchema = z.object({
 // In-memory store for now
 const leads: z.infer<typeof leadSchema>[] = [];
 
-async function sendEmailNotification(lead: z.infer<typeof leadSchema>) {
+async function sendEmailNotification(rawLead: z.infer<typeof leadSchema>) {
+  const lead = deepEscape(rawLead); // caller-supplied strings are HTML-escaped before templating
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn('RESEND_API_KEY not set, skipping email');
@@ -36,7 +38,7 @@ async function sendEmailNotification(lead: z.infer<typeof leadSchema>) {
       body: JSON.stringify({
         from: 'K&D Roofing <noreply@kanddroofingnc.com>',
         to: ['todd@kanddroofingnc.com'],
-        subject: `New MeasureNow Lead: ${lead.name}`,
+        subject: `New MeasureNow Lead: ${rawLead.name.slice(0, 100)}`,
         html: `
           <h2>New Lead from MeasureNow</h2>
           <table style="border-collapse:collapse;font-family:sans-serif;">
@@ -117,7 +119,8 @@ async function pushToJobNimbus(lead: z.infer<typeof leadSchema>) {
   }
 }
 
-leadRouter.post('/capture', async (req: Request, res: Response) => {
+// Public (homeowner quote result form). Fixed recipient (Todd); strict per-IP limit + daily cap.
+leadRouter.post('/capture', perIpLimit('lead', 60 * 60_000, 5), dailyCap('lead', 50, 50), async (req: Request, res: Response) => {
   try {
     const parsed = leadSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -140,7 +143,7 @@ leadRouter.post('/capture', async (req: Request, res: Response) => {
   }
 });
 
-// Admin endpoint to view leads (protect in production)
-leadRouter.get('/list', (_req: Request, res: Response) => {
+// Staff-only: lead list contains customer PII
+leadRouter.get('/list', requireAuth, (_req: Request, res: Response) => {
   return res.json({ count: leads.length, leads });
 });

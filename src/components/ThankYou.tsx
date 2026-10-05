@@ -28,8 +28,8 @@ export function ThankYou({ name, data, onStartOver }: Props) {
           on-site inspection and provide a detailed written estimate.
         </p>
 
-        <a href="tel:+19195551234" className="thank-you__phone">
-          📞 Call Us Now: (919) 555-1234
+        <a href="tel:+19199774074" className="thank-you__phone">
+          📞 Call Us Now: (919) 977-4074
         </a>
 
         <div className="next-steps">
