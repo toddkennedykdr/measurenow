@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { NavBar } from './components/NavBar';
+import { BrandLogo } from './components/BrandLogo';
 import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
@@ -49,12 +50,11 @@ export default function App() {
   };
 
   return (
+    <>
+    <NavBar />
     <div className="widget">
-      <NavBar />
       <header className="header">
-        <div className="header__logo">
-          K&amp;D <span>Roofing</span>
-        </div>
+        <BrandLogo size="login" />
         <div className="header__tagline">Serving North Carolina since 2018</div>
       </header>
 
@@ -88,5 +88,6 @@ export default function App() {
         · Licensed &amp; Insured
       </footer>
     </div>
+    </>
   );
 }

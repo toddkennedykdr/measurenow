@@ -66,40 +66,39 @@ export function JNModal({ address, reportRef, onClose }: Props) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, fontFamily: 'Inter, system-ui, sans-serif' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: 'white', borderRadius: 12, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ padding: '20px 20px 12px', borderBottom: '1px solid #e5e7eb' }}>
+      <div style={{ background: 'white', border: '1px solid var(--line)', borderRadius: 16, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--shadow)' }}>
+        <div style={{ padding: '20px 20px 12px', borderBottom: '1px solid var(--line)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, color: '#032D59', fontSize: 18 }}>📤 Send to JobNimbus</h3>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>✕</button>
+            <h3 style={{ margin: 0, color: 'var(--navy)', fontSize: 18 }}>📤 Send to JobNimbus</h3>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--muted)', minWidth: 44, minHeight: 44 }}>✕</button>
           </div>
           {success ? (
-            <div style={{ background: '#ecfdf5', color: '#16a34a', padding: '12px 16px', borderRadius: 8, fontWeight: 600 }}>{success}</div>
+            <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '12px 16px', borderRadius: 8, fontWeight: 600 }}>{success}</div>
           ) : (
             <div style={{ display: 'flex', gap: 8 }}>
-              <input value={search} onChange={e => setSearch(e.target.value)}
+              <input className="input" value={search} onChange={e => setSearch(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
                 placeholder="Search jobs by name or address..."
-                style={{ flex: 1, padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14 }} autoFocus />
-              <button onClick={handleSearch} disabled={loading}
-                style={{ padding: '10px 16px', background: '#032D59', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                style={{ flex: 1 }} autoFocus />
+              <button onClick={handleSearch} disabled={loading} className="btn btn--primary" style={{ width: 'auto', padding: '10px 16px' }}>
                 {loading ? '...' : 'Search'}
               </button>
             </div>
           )}
-          {error && <div style={{ color: '#E2312B', fontSize: 13, marginTop: 8 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{error}</div>}
         </div>
         {!success && (
           <div style={{ overflow: 'auto', flex: 1, padding: '8px 0' }}>
-            {jobs.length === 0 && !loading && <div style={{ padding: '24px 20px', textAlign: 'center', color: '#6b7280', fontSize: 14 }}>Search for a job to send this report to.</div>}
+            {jobs.length === 0 && !loading && <div style={{ padding: '24px 20px', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Search for a job to send this report to.</div>}
             {Array.isArray(jobs) && jobs.map(job => (
               <button key={job.jnid} onClick={() => handleSendToJob(job)} disabled={sending}
-                style={{ display: 'block', width: '100%', padding: '12px 20px', border: 'none', borderBottom: '1px solid #f3f4f6', background: 'white', cursor: 'pointer', textAlign: 'left', transition: 'background 0.15s' }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
+                style={{ display: 'block', width: '100%', padding: '12px 20px', border: 'none', borderBottom: '1px solid var(--line)', background: 'white', cursor: 'pointer', textAlign: 'left', transition: 'background 0.15s' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
-                <div style={{ fontWeight: 600, color: '#032D59', fontSize: 14 }}>{job.display_name || job.name || job.number || 'Unnamed'}</div>
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                <div style={{ fontWeight: 600, color: 'var(--navy)', fontSize: 14 }}>{job.display_name || job.name || job.number || 'Unnamed'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                   {[job.address_line1, job.city, job.state_text].filter(Boolean).join(', ')}
-                  {job.status_name && <span style={{ marginLeft: 8, background: '#e5e7eb', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>{job.status_name}</span>}
+                  {job.status_name && <span style={{ marginLeft: 8, background: '#e6eaf1', color: 'var(--navy)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>{job.status_name}</span>}
                 </div>
               </button>
             ))}

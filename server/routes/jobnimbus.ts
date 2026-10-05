@@ -39,7 +39,7 @@ jnRouter.post('/upload', requireAuth, async (req: Request, res: Response) => {
 
     // Create a simple HTML file for the report
     const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Inspection Report - ${address}</title>
-    <style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#374151}</style>
+    <style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#4a5568}</style>
     </head><body>${reportHtml}</body></html>`;
     
     const blob = new Blob([fullHtml], { type: 'text/html' });
