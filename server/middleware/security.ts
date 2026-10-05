@@ -1,16 +1,78 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
+import { eq } from 'drizzle-orm';
+import { db, schema } from '../db';
+import { accessDecision } from '../authz';
+
+export type SessionUser = {
+  id: number;
+  name: string;
+  username: string;
+  role: string;
+  disabled: boolean;
+};
 
 /** True when the request carries a logged-in staff session. */
 export function isStaff(req: Request): boolean {
   return Boolean((req.session as any)?.userId);
 }
 
-/** 401 unless the request has a logged-in session (existing express-session auth). */
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!isStaff(req)) return res.status(401).json({ error: 'Not authenticated' });
-  next();
+export async function loadSessionUser(userId: number): Promise<SessionUser | null> {
+  const rows = await db.select({
+    id: schema.users.id,
+    name: schema.users.name,
+    username: schema.users.username,
+    role: schema.users.role,
+    disabled: schema.users.disabled,
+  }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+  return rows[0] ?? null;
 }
+
+function sessionUserId(req: Request): number | null {
+  const id = (req.session as any)?.userId;
+  return typeof id === 'number' && Number.isFinite(id) ? id : null;
+}
+
+/** 401 unless the request has a logged-in, enabled account. */
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const userId = sessionUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const user = await loadSessionUser(userId);
+    if (accessDecision(user, false) !== 200) return res.status(401).json({ error: 'Not authenticated' });
+    (req as any).currentUser = user;
+    next();
+  } catch (err) {
+    console.error('auth check failed');
+    return res.status(500).json({ error: 'Something went wrong' });
+  }
+}
+
+/** 401 when logged out or disabled, 403 when the account is not an admin. */
+export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const userId = sessionUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const user = await loadSessionUser(userId);
+    const code = accessDecision(user, true);
+    if (code === 401) return res.status(401).json({ error: 'Not authenticated' });
+    if (code === 403) return res.status(403).json({ error: 'Admin only' });
+    (req as any).currentUser = user;
+    next();
+  } catch (err) {
+    console.error('admin check failed');
+    return res.status(500).json({ error: 'Something went wrong' });
+  }
+}
+
+/** Same window as the global /api limiter that already covers /api/auth. */
+export const adminRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again in a minute.' },
+});
 
 function envInt(name: string, fallback: number): number {
   const n = parseInt(process.env[name] || '', 10);

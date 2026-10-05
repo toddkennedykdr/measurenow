@@ -36,6 +36,14 @@ try {
     const r = m === 'GET' ? await req(p) : await jpost(p, { address: '1 Test St', repEmail: 'x@evil.example' });
     check(`${m} ${p} anonymous -> 401`, r.status === 401, `got ${r.status}`);
   }
+  for (const p of ['/api/admin/users', '/api/admin/invites', '/api/admin/orders']) {
+    const r = await req(p, { headers: { 'X-Forwarded-For': '198.51.100.40' } });
+    check(`GET ${p} anonymous -> 401`, r.status === 401, `got ${r.status}`);
+  }
+  let invite = await jpost('/api/auth/accept-invite', { token: 'not-a-token', password: 'long-enough-pw' }, { 'X-Forwarded-For': '198.51.100.41' });
+  check('accept-invite bad token -> 400 without a database', invite.status === 400, `got ${invite.status}`);
+  invite = await jpost('/api/auth/accept-invite', { token: 'a'.repeat(32), password: 'short' }, { 'X-Forwarded-For': '198.51.100.42' });
+  check('accept-invite short password -> 400', invite.status === 400, `got ${invite.status}`);
 
   // 2. Unknown /api -> JSON 404; non-API path -> SPA 200
   let r = await req('/api/reports/admin/all/x'); // nonexistent

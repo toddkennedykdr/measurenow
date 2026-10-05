@@ -1,17 +1,16 @@
 import { Pool } from 'pg';
 import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 import bcrypt from 'bcryptjs';
-import { eq } from 'drizzle-orm';
 import * as schema from './schema';
+import { shouldSeedAdmin } from '../authz';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://localhost:5432/measurenow';
 
-const pool = new Pool({ connectionString: DATABASE_URL });
+export const pool = new Pool({ connectionString: DATABASE_URL });
 
 export const db: NodePgDatabase<typeof schema> = drizzle(pool, { schema });
 
 export async function initDb() {
-  // Create tables
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -34,19 +33,56 @@ export async function initDb() {
     );
   `);
 
-  // Seed users if not exists
-  const seedUsers = [
-    { username: 'Todd', password: 'demo123', name: 'Todd Kennedy' },
-    { username: 'Isaac', password: 'kd2026!', name: 'Isaac Klick' },
-  ];
-  for (const u of seedUsers) {
-    const existing = await db.select().from(schema.users).where(eq(schema.users.username, u.username)).limit(1);
-    if (!existing[0]) {
-      const hash = bcrypt.hashSync(u.password, 10);
-      await db.insert(schema.users).values({ username: u.username, passwordHash: hash, name: u.name });
-      console.log(`Seeded user: ${u.username}`);
-    }
+  // Safe for databases that already have users. Does not rewrite password hashes.
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
+  `);
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+  await pool.query(`UPDATE users SET role = 'admin' WHERE username = 'Todd' AND role IS DISTINCT FROM 'admin'`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS invites (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      username TEXT NOT NULL,
+      email TEXT,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL,
+      used_at TIMESTAMP,
+      revoked_at TIMESTAMP
+    );
+  `);
+
+  const count = await pool.query(`SELECT COUNT(*)::int AS n FROM users`);
+  const userCount = count.rows[0]?.n ?? 0;
+  const seed = shouldSeedAdmin(userCount, process.env.SEED_ADMIN_PASSWORD);
+  if (seed === 'skip-not-empty') return;
+  if (seed === 'skip-no-password') {
+    console.warn('Users table is empty and SEED_ADMIN_PASSWORD is not set; skipping admin seed.');
+    return;
   }
+  if (seed === 'skip-short-password') {
+    console.warn('SEED_ADMIN_PASSWORD must be at least 12 characters; skipping admin seed.');
+    return;
+  }
+  const hash = bcrypt.hashSync(process.env.SEED_ADMIN_PASSWORD as string, 10);
+  await db.insert(schema.users).values({
+    username: 'Todd',
+    passwordHash: hash,
+    name: 'Todd Kennedy',
+    role: 'admin',
+    disabled: false,
+  });
+  console.log('Seeded admin user Todd from SEED_ADMIN_PASSWORD.');
 }
 
 export { schema };

@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
+import { BrandLogo } from '../components/BrandLogo';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
 import { useAuth } from '../context/AuthContext';
+import { severityColor, conditionColor } from '../statusColors';
 
 function formatPrice(n: number) { return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }); }
-function severityColor(s: string) { return s === 'major' ? '#E2312B' : s === 'minor' ? '#ca8a04' : '#16a34a'; }
-function conditionColor(c: string) { return c === 'poor' ? '#E2312B' : c === 'fair' ? '#ca8a04' : '#16a34a'; }
 
 const COMPLEXITY_MULTIPLIERS: Record<number, number> = { 1: 1.0, 2: 1.05, 3: 1.1, 4: 1.15, 5: 1.3 };
 const SIDING_PRICES: Record<string, { low: number; high: number; label: string }> = {
@@ -75,12 +75,13 @@ export default function ReportDetailPage() {
   };
 
   return (
+    <>
+    <NavBar />
     <div className="inspect-page">
-      <NavBar />
       <div className="inspect-report hover-report" ref={reportRef}>
         <div className="hover-header">
           <div className="hover-header__brand">
-            <div className="hover-header__logo">K&D <span>Roofing</span></div>
+            <div className="hover-header__logo"><BrandLogo size="header" /></div>
             <div className="hover-header__tagline">Complete Property Measurements</div>
           </div>
           <div className="hover-header__meta">
@@ -195,5 +196,6 @@ export default function ReportDetailPage() {
 
       <footer className="footer">© {new Date().getFullYear()} <a href="https://kanddroofingnc.com" target="_blank" rel="noopener">K&amp;D Roofing NC</a> · Licensed &amp; Insured</footer>
     </div>
+    </>
   );
 }

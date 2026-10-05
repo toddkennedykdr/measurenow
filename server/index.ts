@@ -9,6 +9,7 @@ import { roofRouter } from './routes/roof';
 import { leadRouter } from './routes/lead';
 import { inspectRouter } from './routes/inspect';
 import { authRouter } from './routes/auth';
+import { adminRouter } from './routes/admin';
 import { reportsRouter } from './routes/reports';
 import { jnRouter } from './routes/jobnimbus';
 
@@ -55,6 +56,7 @@ app.use('/api', rateLimit({
 }));
 
 app.use('/api/auth', authRouter);
+app.use('/api/admin', adminRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/jn', jnRouter);
 app.use('/api/roof', roofRouter);

@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
+import { BrandLogo } from '../components/BrandLogo';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
 import { useAuth } from '../context/AuthContext';
+import { severityColor, conditionColor, complexityColor } from '../statusColors';
 
 // Types
 interface PhotoSlot {
@@ -134,18 +136,6 @@ function formatPrice(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-function severityColor(s: string) {
-  if (s === 'major') return '#E2312B';
-  if (s === 'minor') return '#ca8a04';
-  return '#16a34a';
-}
-
-function conditionColor(c: string) {
-  if (c === 'poor') return '#E2312B';
-  if (c === 'fair') return '#ca8a04';
-  return '#16a34a';
-}
-
 export default function InspectPage() {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>('address');
@@ -224,7 +214,20 @@ export default function InspectPage() {
         center: position, zoom: 20, mapTypeId: 'hybrid',
         disableDefaultUI: true, zoomControl: true, gestureHandling: 'greedy',
       });
-      const marker = new google.maps.Marker({ position, map, draggable: true, title: 'Property' });
+      const marker = new google.maps.Marker({
+        position,
+        map,
+        draggable: true,
+        title: 'Property',
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: '#1b5de0',
+          fillOpacity: 1,
+          strokeColor: '#f5a623',
+          strokeWeight: 3,
+        },
+      });
       marker.addListener('dragend', () => {
         const pos = marker.getPosition();
         if (pos) { setConfirmedLat(pos.lat()); setConfirmedLng(pos.lng()); setPinDragged(true); }
@@ -375,13 +378,11 @@ export default function InspectPage() {
   const sidingHigh = Math.round(wallSquares * sidingPricing.high / 100) * 100;
 
   return (
+    <>
+    <NavBar />
     <div className="inspect-page">
-      <NavBar />
       <header className="inspect-header">
-        <div className="inspect-header__top">
-          <div className="header__logo">K&amp;D <span>Roofing</span></div>
-        </div>
-        <div className="inspect-header__title">🔍 Roof & Siding Inspection</div>
+        <div className="inspect-header__title">Roof & Siding Inspection</div>
       </header>
 
       {error && <div className="error-msg">{error}</div>}
@@ -579,7 +580,7 @@ export default function InspectPage() {
           {/* Property Header */}
           <div className="hover-header">
             <div className="hover-header__brand">
-              <div className="hover-header__logo">K&D <span>Roofing</span></div>
+              <div className="hover-header__logo"><BrandLogo size="header" /></div>
               <div className="hover-header__tagline">Complete Property Measurements</div>
             </div>
             <div className="hover-header__meta">
@@ -632,7 +633,7 @@ export default function InspectPage() {
               <h2 className="hover-section__title">Siding Summary</h2>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 {buildingMeasurements?.measurementSource === 'satellite' && (
-                  <span className="hover-section__badge" style={{ background: '#2563eb', fontSize: '10px', padding: '3px 8px' }}>
+                  <span className="hover-section__badge" style={{ background: '#1b5de0', fontSize: '10px', padding: '3px 8px' }}>
                     🛰️ SATELLITE MEASURED
                   </span>
                 )}
@@ -822,7 +823,7 @@ export default function InspectPage() {
               <div className="hover-complexity__bar">
                 {[1, 2, 3, 4, 5].map(n => (
                   <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`}
-                    style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }} />
+                    style={{ background: n <= complexityRating ? complexityColor(complexityRating) : undefined }} />
                 ))}
               </div>
               <span className="hover-complexity__text">{complexityRating}/5 — {analysis.complexity.explanation}</span>
@@ -947,5 +948,6 @@ export default function InspectPage() {
         {' '}· Licensed &amp; Insured
       </footer>
     </div>
+    </>
   );
 }

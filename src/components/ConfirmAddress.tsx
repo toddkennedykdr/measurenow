@@ -83,6 +83,14 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
         map,
         draggable: true,
         title: 'Your home',
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: '#1b5de0',
+          fillOpacity: 1,
+          strokeColor: '#f5a623',
+          strokeWeight: 3,
+        },
       });
 
       marker.addListener('dragend', () => {
