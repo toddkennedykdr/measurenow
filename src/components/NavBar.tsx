@@ -28,6 +28,9 @@ export function NavBar() {
             {item('/', 'Dashboard', path === '/')}
             {item('/quote', 'Quote', path === '/quote')}
             {item('/inspect', 'Inspect', path === '/inspect')}
+            {user.role === 'admin' && item('/admin/users', 'Users', path.startsWith('/admin/users'))}
+            {user.role === 'admin' && item('/admin/invites', 'Invites', path.startsWith('/admin/invites'))}
+            {user.role === 'admin' && item('/admin/orders', 'Orders', path.startsWith('/admin/orders'))}
           </>
         ) : (
           <>

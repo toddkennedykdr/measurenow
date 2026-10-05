@@ -1,14 +1,10 @@
 import { Router, Request, Response } from 'express';
+import { requireAuth } from '../middleware/security';
 
 export const jnRouter = Router();
 
 const JN_BASE = 'https://app.jobnimbus.com/api1';
 const JN_TOKEN = process.env.JOBNIMBUS_API_KEY || 'mlfiyztya8bjzm92';
-
-function requireAuth(req: Request, res: Response, next: any) {
-  if (!(req.session as any)?.userId) return res.status(401).json({ error: 'Not authenticated' });
-  next();
-}
 
 // Search jobs
 jnRouter.get('/jobs', requireAuth, async (req: Request, res: Response) => {

@@ -10,7 +10,8 @@
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/index.js",
     "preview": "vite preview",
-    "smoke": "node scripts/smoke-lockdown.mjs"
+    "smoke": "node scripts/smoke-lockdown.mjs && node scripts/smoke-admin.mjs",
+    "smoke:admin": "node scripts/smoke-admin.mjs"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",
