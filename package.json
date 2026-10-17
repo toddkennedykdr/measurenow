@@ -8,9 +8,9 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
-    "test": "tsx --test server/middleware/roofAccess.test.ts",
     "start": "node dist-server/index.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",
