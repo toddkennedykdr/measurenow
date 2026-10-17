@@ -3,6 +3,7 @@ import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import * as schema from './schema';
+import { SEED_USERS, seedPasswordFromEnv } from './seedUsers';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://localhost:5432/measurenow';
 
@@ -40,18 +41,23 @@ export async function initDb() {
   // Ensure Todd is admin
   await pool.query(`UPDATE users SET is_admin = true WHERE username = 'Todd';`);
 
-  // Seed users if not exists
-  const seedUsers = [
-    { username: 'Todd', password: 'demo123', name: 'Todd Kennedy', isAdmin: true },
-    { username: 'Isaac', password: 'kd2026!', name: 'Isaac Klick', isAdmin: false },
-    { username: 'Rob', password: 'kd2026!', name: 'Robert Copp', isAdmin: false },
-  ];
-  for (const u of seedUsers) {
-    const existing = await db.select().from(schema.users).where(eq(schema.users.username, u.username)).limit(1);
+  // Insert missing staff users only. Never update or delete an existing row.
+  for (const user of SEED_USERS) {
+    const password = seedPasswordFromEnv(process.env, user.passwordEnv);
+    if (!password) {
+      console.log(`Skipping seed for ${user.username}: ${user.passwordEnv} is not set`);
+      continue;
+    }
+    const existing = await db.select().from(schema.users).where(eq(schema.users.username, user.username)).limit(1);
     if (!existing[0]) {
-      const hash = bcrypt.hashSync(u.password, 10);
-      await db.insert(schema.users).values({ username: u.username, passwordHash: hash, name: u.name, isAdmin: u.isAdmin });
-      console.log(`Seeded user: ${u.username}`);
+      const hash = bcrypt.hashSync(password, 10);
+      await db.insert(schema.users).values({
+        username: user.username,
+        passwordHash: hash,
+        name: user.name,
+        isAdmin: user.isAdmin,
+      });
+      console.log(`Seeded user: ${user.username}`);
     }
   }
 }
