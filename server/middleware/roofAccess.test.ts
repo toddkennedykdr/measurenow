@@ -101,7 +101,7 @@ function testApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.use(session({
-    secret: 'test-session-secret',
+    secret: JN_API_KEY_DUMMY,
     resave: false,
     saveUninitialized: false,
   }));
@@ -145,7 +145,7 @@ describe('roof route gate', () => {
 
       const wrong = await fetch(`${base}/geocode`, {
         method: 'POST',
-        headers: { 'x-api-key': 'wrong' },
+        headers: { 'x-api-key': JN_API_KEY_DUMMY + '-extra' },
       });
       assert.equal(wrong.status, 401);
 
