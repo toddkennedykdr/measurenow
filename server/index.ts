@@ -10,7 +10,7 @@ import { leadRouter } from './routes/lead';
 import { inspectRouter } from './routes/inspect';
 import { authRouter } from './routes/auth';
 import { reportsRouter } from './routes/reports';
-import { jnRouter } from './routes/jobnimbus';
+import { jnRouter, warnIfJobNimbusUnconfigured } from './routes/jobnimbus';
 
 dotenv.config();
 
@@ -60,6 +60,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 async function start() {
+  warnIfJobNimbusUnconfigured();
   await initDb();
   app.listen(PORT, () => {
     console.log(`MeasureNow server running on port ${PORT}`);
