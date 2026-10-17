@@ -31,9 +31,13 @@ let upstream = 0;
 
 function installUpstreamMock() {
   upstream = 0;
-  globalThis.fetch = async (input: RequestInfo | URL) => {
+  const realFetch = saved.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(raw);
+    if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') {
+      return realFetch(input, init);
+    }
     const hostPath = `${url.hostname}${url.pathname}`;
     if (url.hostname === 'maps.googleapis.com' && url.pathname === '/maps/api/geocode/json') {
       upstream += 1;
@@ -99,6 +103,7 @@ describe('roof hardening', { concurrency: false }, () => {
       JN_API_KEY_DUMMY,
       '&marker=UPSTREAM-BODY',
     ].join('');
+    const prevFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response(leaked, { status: 403 });
     const lines: string[] = [];
     const prev = console.error;
@@ -109,6 +114,7 @@ describe('roof hardening', { concurrency: false }, () => {
       assert.equal(await getBuildingInsights(35.78, -78.64), null);
     } finally {
       console.error = prev;
+      globalThis.fetch = prevFetch;
     }
     const flat = lines.join('\n');
     assert.match(flat, /\b403\b/);
@@ -120,6 +126,7 @@ describe('roof hardening', { concurrency: false }, () => {
   });
 
   it('returns JSON 400 for a malformed JSON body', async () => {
+    globalThis.fetch = saved.fetch;
     const app = express();
     app.use(express.json({ limit: '10mb' }));
     app.use(malformedJsonHandler);

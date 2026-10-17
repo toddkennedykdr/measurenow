@@ -51,8 +51,10 @@ function allMatches(re: RegExp, line: string): RegExpMatchArray[] {
 }
 
 export function isCredentialName(name: string): boolean {
-  if (/(?:^|[_-])api[-_]?key$/i.test(name)) return true;
-  if (/apiKey$/.test(name)) return true;
+  if (/api[-_]?key/i.test(name) || /apiKey/.test(name)) {
+    // API_KEY_HEADER stores the header name, not the key.
+    return !/header$/i.test(name);
+  }
   if (/(?:^|_)(?:password|passwd|pwd|secret|token)$/i.test(name)) return true;
   if (/[a-z](?:Password|Passwd|Pwd|Secret|Token)$/.test(name)) return true;
   // Bare `key` is a column or keyboard field. STORAGE_KEY is a local name.
