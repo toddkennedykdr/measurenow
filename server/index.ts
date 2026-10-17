@@ -23,9 +23,15 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: '10mb' }));
 
-// Session
+// Session signing key is required. No literal fallback.
+const sessionSecret = process.env.SESSION_SECRET;
+if (typeof sessionSecret !== 'string' || sessionSecret.trim() === '') {
+  console.error('Fatal: SESSION_SECRET is not set. Refusing to start.');
+  process.exit(1);
+}
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'kd-measurenow-secret-2024',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: {

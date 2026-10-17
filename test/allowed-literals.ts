@@ -18,3 +18,12 @@ export function isObviouslyFake(value: string): boolean {
 export function isAllowedLiteral(value: string): boolean {
   return ALLOWED_EXACT.has(value) && isObviouslyFake(value);
 }
+
+// Exact "path/from/repo/root:line" exemptions. No globs. Empty unless one
+// line must keep a literal that is not an exact allowlisted fake.
+export const ALLOWED_FILE_LINES = new Set<string>();
+
+export function isAllowedAt(file: string, line: number, value: string): boolean {
+  if (ALLOWED_FILE_LINES.has(`${file}:${line}`)) return true;
+  return isAllowedLiteral(value);
+}
