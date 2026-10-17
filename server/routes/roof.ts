@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { roofApiKeyMatches } from '../middleware/roofAccess';
 import { rejectIfPublicDailyCap } from '../publicDailyCap';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
@@ -7,9 +8,9 @@ import { calculateQuote, type RoofQuote } from '../services/pricing';
 
 export const roofRouter = Router();
 
-/** Drop every whitespace character so padding cannot disguise the Solar key. */
+/** Quotes, commas, and whitespace must not disguise the Solar key. */
 function normalizeKey(value: string | undefined): string {
-  return (value ?? '').replace(/\s+/g, '');
+  return (value ?? '').replace(/['"`,\s]+/g, '').toLowerCase();
 }
 
 // Browser-restricted Maps JavaScript API key. Never the Solar server key.
@@ -18,10 +19,16 @@ roofRouter.get('/maps-key', (_req: Request, res: Response) => {
   const solarNorm = normalizeKey(process.env.GOOGLE_SOLAR_API_KEY);
   const browserNorm = normalizeKey(browserRaw);
   // The map runs in the browser, so it gets only the referrer-restricted Maps key.
-  // Compare normalized keys: extra spaces must not let the Solar key through.
-  const key = solarNorm !== '' && browserNorm === solarNorm ? '' : browserRaw.trim();
+  // Any browser value that still contains the Solar key after normalization is withheld.
+  const key = solarNorm !== '' && browserNorm.includes(solarNorm) ? '' : browserRaw.trim();
   res.json({ key });
 });
+
+/** Staff sessions and a valid ROOF_API_KEY do not use the public daily cap. */
+function skipsPublicDailyCap(req: Request): boolean {
+  if ((req.session as { userId?: number } | undefined)?.userId) return true;
+  return roofApiKeyMatches(req.header('x-api-key'));
+}
 
 const addressSchema = z.object({
   address: z.string().min(5, 'Please enter a valid address'),
@@ -35,11 +42,11 @@ const quoteSchema = z.object({
 // Step 1: Geocode only — returns lat/lng and formatted address
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
   try {
-    if (rejectIfPublicDailyCap(res)) return;
     const parsed = addressSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
     }
+    if (!skipsPublicDailyCap(req) && rejectIfPublicDailyCap(res)) return;
 
     const location = await geocodeAddress(parsed.data.address);
     if (!location) {
@@ -62,11 +69,11 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
 // Step 2: Get quote using confirmed lat/lng
 roofRouter.post('/quote', async (req: Request, res: Response) => {
   try {
-    if (rejectIfPublicDailyCap(res)) return;
     const parsed = quoteSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid coordinates.' });
     }
+    if (!skipsPublicDailyCap(req) && rejectIfPublicDailyCap(res)) return;
 
     const { lat, lng } = parsed.data;
 

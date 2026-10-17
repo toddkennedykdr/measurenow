@@ -25,9 +25,12 @@ export function easternCalendarDay(ms: number): string {
 
 export function publicDailyCapLimit(): number {
   const raw = process.env[ROOF_PUBLIC_DAILY_CAP_ENV];
-  if (raw === undefined || raw.trim() === '') return DEFAULT_PUBLIC_DAILY_CAP;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) return DEFAULT_PUBLIC_DAILY_CAP;
+  if (raw === undefined) return DEFAULT_PUBLIC_DAILY_CAP;
+  const trimmed = raw.trim();
+  // Only a plain non-negative integer. 1e3, 0x10, 5.5, and blanks fall back.
+  if (!/^\d+$/.test(trimmed)) return DEFAULT_PUBLIC_DAILY_CAP;
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed)) return DEFAULT_PUBLIC_DAILY_CAP;
   return parsed;
 }
 

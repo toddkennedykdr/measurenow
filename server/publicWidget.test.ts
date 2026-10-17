@@ -220,6 +220,35 @@ describe('public quote widget', { concurrency: false }, () => {
     });
   });
 
+  it('withholds the solar key when quotes, commas, or case hide it', async () => {
+    const solar = JN_API_KEY_DUMMY;
+    const upper = solar.toUpperCase();
+    const cases = [
+      ['"', upper, '"'].join(''),
+      ["'", upper, "'"].join(''),
+      [upper, ','].join(''),
+      solar.toLowerCase(),
+      ['prefix-', upper, '-suffix'].join(''),
+    ];
+    process.env.GOOGLE_SOLAR_API_KEY = upper;
+    await withServer(async (base) => {
+      for (let i = 0; i < cases.length; i++) {
+        process.env.GOOGLE_MAPS_BROWSER_KEY = cases[i];
+        const res = await read(await fetch(`${base}/api/roof/maps-key`, {
+          headers: { 'x-forwarded-for': `203.0.113.${120 + i}` },
+        }));
+        assert.equal(res.status, 200, cases[i]);
+        assert.deepEqual(JSON.parse(res.text), { key: '' });
+      }
+      process.env.GOOGLE_MAPS_BROWSER_KEY = ['  ', ENV_EXAMPLE_API_KEY_PLACEHOLDER, '  '].join('');
+      const other = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.130' },
+      }));
+      assert.equal(other.status, 200);
+      assert.deepEqual(JSON.parse(other.text), { key: ENV_EXAMPLE_API_KEY_PLACEHOLDER });
+    });
+  });
+
   it('returns 401 for staff roof routes when logged out', async () => {
     await withServer(async (base) => {
       const ip = { 'x-forwarded-for': '203.0.113.82', 'content-type': 'application/json' };
