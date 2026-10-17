@@ -6,12 +6,12 @@ import session from 'express-session';
 import dotenv from 'dotenv';
 import path from 'path';
 import { roofRouter } from './routes/roof';
-import { requireRoofAccess, roofRateLimit } from './middleware/roofAccess';
 import { leadRouter } from './routes/lead';
 import { inspectRouter } from './routes/inspect';
 import { authRouter } from './routes/auth';
 import { reportsRouter } from './routes/reports';
 import { jnRouter, warnIfJobNimbusUnconfigured } from './routes/jobnimbus';
+import { requireRoofAccess, roofRateLimit } from './middleware/roofAccess';
 
 dotenv.config();
 

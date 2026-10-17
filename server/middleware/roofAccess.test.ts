@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import express from 'express';
 import session from 'express-session';
 import type { NextFunction, Request, Response } from 'express';
+import { JN_API_KEY_DUMMY } from '../../test/allowed-literals';
 import { requireRoofAccess, roofApiKeyMatches, roofRateLimit } from './roofAccess';
 
 const ORIGINAL_KEY = process.env.ROOF_API_KEY;
@@ -37,10 +38,10 @@ describe('roofApiKeyMatches', () => {
   });
 
   it('accepts only an exact match', () => {
-    process.env.ROOF_API_KEY = 'server-secret';
-    assert.equal(roofApiKeyMatches('server-secret'), true);
+    process.env.ROOF_API_KEY = JN_API_KEY_DUMMY;
+    assert.equal(roofApiKeyMatches(JN_API_KEY_DUMMY), true);
     assert.equal(roofApiKeyMatches('server-secreT'), false);
-    assert.equal(roofApiKeyMatches('server-secret-extra'), false);
+    assert.equal(roofApiKeyMatches(JN_API_KEY_DUMMY + '-extra'), false);
     assert.equal(roofApiKeyMatches('short'), false);
     assert.equal(roofApiKeyMatches(''), false);
     assert.equal(roofApiKeyMatches(undefined), false);
@@ -59,11 +60,11 @@ describe('requireRoofAccess', () => {
   });
 
   it('allows a matching x-api-key', () => {
-    process.env.ROOF_API_KEY = 'server-secret';
+    process.env.ROOF_API_KEY = JN_API_KEY_DUMMY;
     let nextCalled = false;
     const req = {
       session: {},
-      header: (name: string) => (name === 'x-api-key' ? 'server-secret' : undefined),
+      header: (name: string) => (name === 'x-api-key' ? JN_API_KEY_DUMMY : undefined),
     } as unknown as Request;
     const res = mockRes();
     requireRoofAccess(req, res as unknown as Response, (() => { nextCalled = true; }) as NextFunction);
@@ -71,7 +72,7 @@ describe('requireRoofAccess', () => {
   });
 
   it('returns 401 when there is no session and the key is missing or wrong', () => {
-    process.env.ROOF_API_KEY = 'server-secret';
+    process.env.ROOF_API_KEY = JN_API_KEY_DUMMY;
     const req = {
       session: {},
       header: () => 'nope',
@@ -88,7 +89,7 @@ describe('requireRoofAccess', () => {
     delete process.env.ROOF_API_KEY;
     const req = {
       session: {},
-      header: () => 'server-secret',
+      header: () => JN_API_KEY_DUMMY,
     } as unknown as Request;
     const res = mockRes();
     requireRoofAccess(req, res as unknown as Response, (() => { throw new Error('should not continue'); }) as NextFunction);
@@ -130,7 +131,7 @@ async function withServer(fn: (base: string) => Promise<void>) {
 
 describe('roof route gate', () => {
   it('rejects anonymous callers and accepts a session or x-api-key', async () => {
-    process.env.ROOF_API_KEY = 'server-secret';
+    process.env.ROOF_API_KEY = JN_API_KEY_DUMMY;
     await withServer(async (base) => {
       const anon = await fetch(`${base}/geocode`, { method: 'POST' });
       assert.equal(anon.status, 401);
@@ -138,7 +139,7 @@ describe('roof route gate', () => {
 
       const keyed = await fetch(`${base}/geocode`, {
         method: 'POST',
-        headers: { 'x-api-key': 'server-secret' },
+        headers: { 'x-api-key': JN_API_KEY_DUMMY },
       });
       assert.equal(keyed.status, 200);
 
