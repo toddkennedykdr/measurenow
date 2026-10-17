@@ -184,6 +184,38 @@ describe('public quote widget', { concurrency: false }, () => {
     });
   });
 
+  it('treats whitespace around either key as the same solar key', async () => {
+    process.env.GOOGLE_SOLAR_API_KEY = ` ${JN_API_KEY_DUMMY} `;
+    process.env.GOOGLE_MAPS_BROWSER_KEY = `\n${JN_API_KEY_DUMMY}\t`;
+    await withServer(async (base) => {
+      const padded = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.84' },
+      }));
+      assert.equal(padded.status, 200);
+      assert.deepEqual(JSON.parse(padded.text), { key: '' });
+    });
+
+    process.env.GOOGLE_SOLAR_API_KEY = JN_API_KEY_DUMMY;
+    process.env.GOOGLE_MAPS_BROWSER_KEY = `${JN_API_KEY_DUMMY.slice(0, 6)} ${JN_API_KEY_DUMMY.slice(6)}`;
+    await withServer(async (base) => {
+      const split = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.85' },
+      }));
+      assert.equal(split.status, 200);
+      assert.deepEqual(JSON.parse(split.text), { key: '' });
+    });
+
+    process.env.GOOGLE_SOLAR_API_KEY = JN_API_KEY_DUMMY;
+    process.env.GOOGLE_MAPS_BROWSER_KEY = `  ${ENV_EXAMPLE_API_KEY_PLACEHOLDER}  `;
+    await withServer(async (base) => {
+      const other = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.86' },
+      }));
+      assert.equal(other.status, 200);
+      assert.deepEqual(JSON.parse(other.text), { key: ENV_EXAMPLE_API_KEY_PLACEHOLDER });
+    });
+  });
+
   it('returns 401 for staff roof routes when logged out', async () => {
     await withServer(async (base) => {
       const ip = { 'x-forwarded-for': '203.0.113.82', 'content-type': 'application/json' };

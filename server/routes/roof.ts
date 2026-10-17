@@ -1,18 +1,25 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { rejectIfPublicDailyCap } from '../publicDailyCap';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote, type RoofQuote } from '../services/pricing';
 
 export const roofRouter = Router();
 
+/** Drop every whitespace character so padding cannot disguise the Solar key. */
+function normalizeKey(value: string | undefined): string {
+  return (value ?? '').replace(/\s+/g, '');
+}
+
 // Browser-restricted Maps JavaScript API key. Never the Solar server key.
 roofRouter.get('/maps-key', (_req: Request, res: Response) => {
-  const browserKey = process.env.GOOGLE_MAPS_BROWSER_KEY || '';
-  const solarKey = process.env.GOOGLE_SOLAR_API_KEY || '';
+  const browserRaw = process.env.GOOGLE_MAPS_BROWSER_KEY ?? '';
+  const solarNorm = normalizeKey(process.env.GOOGLE_SOLAR_API_KEY);
+  const browserNorm = normalizeKey(browserRaw);
   // The map runs in the browser, so it gets only the referrer-restricted Maps key.
-  // If that var was set to the Solar key, send nothing rather than leak it.
-  const key = solarKey && browserKey === solarKey ? '' : browserKey;
+  // Compare normalized keys: extra spaces must not let the Solar key through.
+  const key = solarNorm !== '' && browserNorm === solarNorm ? '' : browserRaw.trim();
   res.json({ key });
 });
 
@@ -28,6 +35,7 @@ const quoteSchema = z.object({
 // Step 1: Geocode only — returns lat/lng and formatted address
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
   try {
+    if (rejectIfPublicDailyCap(res)) return;
     const parsed = addressSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -54,6 +62,7 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
 // Step 2: Get quote using confirmed lat/lng
 roofRouter.post('/quote', async (req: Request, res: Response) => {
   try {
+    if (rejectIfPublicDailyCap(res)) return;
     const parsed = quoteSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid coordinates.' });

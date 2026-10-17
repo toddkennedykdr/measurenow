@@ -59,8 +59,8 @@ export async function getBuildingInsights(
     const res = await fetch(url.toString());
     if (res.status === 404) continue; // quality not available, try next
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`Solar API error (${quality}):`, res.status, body);
+      // Status only. The request URL, and some error bodies, contain the API key.
+      console.error(`Solar API error (${quality}):`, res.status);
       continue;
     }
 
