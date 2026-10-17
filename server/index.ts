@@ -5,23 +5,15 @@ import rateLimit from 'express-rate-limit';
 import session from 'express-session';
 import dotenv from 'dotenv';
 import path from 'path';
-import { roofRouter } from './routes/roof';
 import { leadRouter } from './routes/lead';
-import { inspectRouter } from './routes/inspect';
 import { authRouter } from './routes/auth';
 import { reportsRouter } from './routes/reports';
 import { jnRouter, warnIfJobNimbusUnconfigured } from './routes/jobnimbus';
-import { requireRoofAccess, roofRateLimit } from './middleware/roofAccess';
+import { mountRoofRoutes } from './mountRoof';
 
 dotenv.config();
 
 import { initDb } from './db';
-
-const sessionSecret = process.env.SESSION_SECRET;
-if (typeof sessionSecret !== 'string' || sessionSecret.trim() === '') {
-  console.error('Fatal: SESSION_SECRET is not set. Refusing to start.');
-  process.exit(1);
-}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -34,7 +26,13 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: '10mb' }));
 
-// Session
+// Session signing key is required. No literal fallback.
+const sessionSecret = process.env.SESSION_SECRET;
+if (typeof sessionSecret !== 'string' || sessionSecret.trim() === '') {
+  console.error('Fatal: SESSION_SECRET is not set. Refusing to start.');
+  process.exit(1);
+}
+
 app.use(session({
   secret: sessionSecret,
   resave: false,
@@ -58,9 +56,7 @@ app.use('/api', rateLimit({
 app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/jn', jnRouter);
-app.use('/api/roof', roofRateLimit, requireRoofAccess);
-app.use('/api/roof', roofRouter);
-app.use('/api/roof', inspectRouter);
+mountRoofRoutes(app);
 app.use('/api/lead', leadRouter);
 
 // Serve static frontend in production

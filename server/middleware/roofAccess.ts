@@ -17,6 +17,20 @@ export function roofApiKeyMatches(provided: string | undefined | null): boolean 
   return timingSafeEqual(sha256(provided), sha256(expected));
 }
 
+/**
+ * Logged-out quote widget. Matched against req.path when mounted at /api/roof.
+ * Everything else under /api/roof stays behind requireRoofAccess.
+ */
+const PUBLIC_WIDGET_ROUTES = new Set([
+  'GET /maps-key',
+  'POST /geocode',
+  'POST /quote',
+]);
+
+export function isPublicWidgetRoute(method: string, path: string): boolean {
+  return PUBLIC_WIDGET_ROUTES.has(`${method.toUpperCase()} ${path}`);
+}
+
 /** Logged-in session, or x-api-key matching ROOF_API_KEY. */
 export function requireRoofAccess(req: Request, res: Response, next: NextFunction): void {
   if ((req.session as { userId?: number } | undefined)?.userId) {
@@ -28,6 +42,15 @@ export function requireRoofAccess(req: Request, res: Response, next: NextFunctio
     return;
   }
   res.status(401).json({ error: 'Not authenticated' });
+}
+
+/** Public widget routes skip auth. Staff and admin routes still require it. */
+export function requireRoofAccessUnlessPublic(req: Request, res: Response, next: NextFunction): void {
+  if (isPublicWidgetRoute(req.method, req.path)) {
+    next();
+    return;
+  }
+  requireRoofAccess(req, res, next);
 }
 
 /** In-memory limit: valid API key shares one bucket; everyone else is limited per IP. */
