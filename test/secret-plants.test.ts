@@ -368,6 +368,145 @@ test('json, markdown, and shell files are scanned', () => {
   expectClean('notes.md', 'export PORT=3001\n');
 });
 
+test('password label maps are not secrets', () => {
+  expectClean('src/labels.ts', "const labels = { password: 'Password' };");
+  expectClean('src/labels.ts', "const labels = { password: 'password', passwd: 'Passwd' };");
+});
+
+test('validation messages are not secrets', () => {
+  expectClean('src/form.ts', "errors.password = 'Password is required';");
+  expectClean('src/form.ts', "errors.password = 'Password must be at least 8 characters';");
+});
+
+test('object key fields are not secrets', () => {
+  expectClean('src/table.ts', "const columns = [{ key: 'address' }, { key: 'Escape' }];");
+});
+
+test('STORAGE_KEY constants are not secrets', () => {
+  expectClean('src/theme.ts', "const STORAGE_KEY = 'measurenow-theme';");
+  expectClean('src/theme.ts', "const storageKey = 'measurenow-theme';");
+});
+
+test('API_KEY_HEADER names are not secrets', () => {
+  expectClean('src/http.ts', "const API_KEY_HEADER = 'x-api-key';");
+});
+
+test('UI copy that mentions secrets is not a secret', () => {
+  expectClean('src/copy.ts', "const copy = { secret: 'Our secret is quality work' };");
+});
+
+test('README angle-bracket and change-me placeholders are not secrets', () => {
+  expectClean('README.md', '    JN_API_KEY=<your JobNimbus key>\nSESSION_SECRET=change-me\n');
+  expectClean('README.md', 'API_KEY=<your-api-key>\nTOKEN=changeme\nSECRET=change_me\n');
+});
+
+test('yaml, compose, Dockerfile, toml, and html are scanned', () => {
+  expectFlag('.github/workflows/ci.yml', asm([
+    'env:\n  JN_',
+    'API_KEY: ',
+    'mlFAKE',
+    'yamlplant01\n',
+  ]), 'api-key');
+  expectFlag('railway.yaml', asm([
+    'API_',
+    'KEY: ',
+    dq,
+    'mlFAKE',
+    'yamlplant02',
+    dq,
+    '\n',
+  ]), 'api-key');
+  expectFlag('docker-compose.yml', asm([
+    'services:\n  app:\n    environment:\n      - JN_',
+    'API_KEY=',
+    'mlFAKE',
+    'compose0003\n',
+  ]), 'api-key');
+  expectFlag('docker-compose', asm([
+    'JN_',
+    'API_KEY: ',
+    'mlFAKE',
+    'compose0003b\n',
+  ]), 'api-key');
+  expectFlag('Dockerfile', asm([
+    'FROM node:20\nENV JN_',
+    'API_KEY=',
+    'mlFAKE',
+    'docker0004\n',
+  ]), 'api-key');
+  expectFlag('Dockerfile', asm([
+    'ENV SESSION_',
+    'SECRET ',
+    'mlFAKE',
+    'docker0005\n',
+  ]), 'api-key');
+  expectFlag('config.toml', asm([
+    'api_key = ',
+    dq,
+    'mlFAKE',
+    'tomlplant06',
+    dq,
+    '\n',
+  ]), 'api-key');
+  expectFlag('widget.html', asm([
+    '<script>const apiKey = ',
+    q,
+    'mlFAKE',
+    'htmlplant07',
+    q,
+    ';</script>\n',
+  ]), 'api-key');
+  expectClean('docker-compose.yml', 'services:\n  app:\n    image: node:20\n    ports:\n      - "3001:3001"\n');
+  expectClean('Dockerfile', 'FROM node:20\nENV PORT=3001\nWORKDIR /app\n');
+  expectClean('notes.toml', 'title = "MeasureNow"\nport = 3001\n');
+  expectClean('index.html', '<label>Password</label>\n<input type="password" />\n');
+});
+
+test('unquoted key assignments in comments are flagged', () => {
+  expectFlag('server/plant.ts', asm([
+    '// JN_',
+    'API_KEY=',
+    'mlFAKE',
+    'commented01',
+  ]), 'api-key');
+  expectFlag('scripts/deploy.sh', asm([
+    '# JN_',
+    'API_KEY=',
+    'mlFAKE',
+    'commented02',
+  ]), 'api-key');
+  expectClean('server/plant.ts', '// JN_API_KEY=');
+  expectClean('server/plant.ts', '// JN_API_KEY=change-me');
+  expectClean('server/plant.ts', 'const apiKey = process.env.JN_API_KEY;');
+});
+
+test('Basic auth credentials are flagged', () => {
+  expectFlag('server/plant.ts', asm([
+    'const h = { Authorization: ',
+    q,
+    'Basic ',
+    'FAKEbasic',
+    'AuthToken==',
+    q,
+    ' };',
+  ]), 'api-key');
+  expectClean('server/plant.ts', "const h = { Authorization: 'Basic authentication' };");
+});
+
+test('Bearer tokens without digits are flagged', () => {
+  expectFlag('server/plant.ts', asm([
+    'const h = { Authorization: ',
+    q,
+    'Bearer ',
+    'mlFAKE',
+    'plantBearer',
+    q,
+    ' };',
+  ]), 'api-key');
+  expectClean('server/plant.ts', "const h = { Authorization: 'Bearer authentication' };");
+  expectClean('server/plant.ts', "const h = { Authorization: 'Bearer short' };");
+});
+
 test('planted fixtures flag every plant.sh case and skip a gitignored env file', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'measurenow-plants-'));
   const git = (args: string[]) => {
