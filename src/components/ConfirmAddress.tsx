@@ -15,9 +15,8 @@ interface Props {
 }
 
 /**
- * NOTE: The Google Maps JavaScript API must be enabled for your API key.
- * Go to https://console.cloud.google.com/apis/library/maps-backend.googleapis.com
- * and enable "Maps JavaScript API" for the project associated with GOOGLE_SOLAR_API_KEY.
+ * NOTE: The Google Maps JavaScript API must be enabled for GOOGLE_MAPS_BROWSER_KEY
+ * (HTTP referrer restricted). The Solar server key must not be sent to the browser.
  */
 
 // Load the Google Maps script once globally
@@ -57,7 +56,7 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
   const initMap = useCallback(async () => {
     try {
       // Get the API key from the server
-      const res = await fetch('/api/roof/maps-key');
+      const res = await fetch('/api/roof/maps-key', { credentials: 'include' });
       const { key } = await res.json();
       await loadGoogleMaps(key);
 
