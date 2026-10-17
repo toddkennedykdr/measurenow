@@ -22,6 +22,7 @@ export default function App() {
     const res = await fetch('/api/roof/quote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ lat, lng }),
     });
     const data = await res.json();

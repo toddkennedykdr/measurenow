@@ -5,12 +5,11 @@ import rateLimit from 'express-rate-limit';
 import session from 'express-session';
 import dotenv from 'dotenv';
 import path from 'path';
-import { roofRouter } from './routes/roof';
 import { leadRouter } from './routes/lead';
-import { inspectRouter } from './routes/inspect';
 import { authRouter } from './routes/auth';
 import { reportsRouter } from './routes/reports';
 import { jnRouter, warnIfJobNimbusUnconfigured } from './routes/jobnimbus';
+import { mountRoofRoutes } from './mountRoof';
 
 dotenv.config();
 
@@ -18,6 +17,10 @@ import { initDb } from './db';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Railway terminates TLS and forwards the client IP. Trust that one hop
+// so per-IP rate limits see the visitor, not the proxy.
+app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
@@ -53,8 +56,7 @@ app.use('/api', rateLimit({
 app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/jn', jnRouter);
-app.use('/api/roof', roofRouter);
-app.use('/api/roof', inspectRouter);
+mountRoofRoutes(app);
 app.use('/api/lead', leadRouter);
 
 // Serve static frontend in production

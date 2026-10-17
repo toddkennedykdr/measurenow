@@ -1,5 +1,9 @@
-const API_KEY = process.env.GOOGLE_SOLAR_API_KEY || '';
 const SQ_M_TO_SQ_FT = 10.764;
+
+/** Read at call time so dotenv and tests can set the key before a request. */
+function googleSolarApiKey(): string {
+  return process.env.GOOGLE_SOLAR_API_KEY || '';
+}
 
 export interface RoofSegment {
   areaSqFt: number;
@@ -50,7 +54,7 @@ export async function getBuildingInsights(
     url.searchParams.set('location.latitude', lat.toString());
     url.searchParams.set('location.longitude', lng.toString());
     url.searchParams.set('requiredQuality', quality);
-    url.searchParams.set('key', API_KEY);
+    url.searchParams.set('key', googleSolarApiKey());
 
     const res = await fetch(url.toString());
     if (res.status === 404) continue; // quality not available, try next
