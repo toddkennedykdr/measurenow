@@ -462,6 +462,26 @@ test('yaml, compose, Dockerfile, toml, and html are scanned', () => {
   expectClean('index.html', '<label>Password</label>\n<input type="password" />\n');
 });
 
+test('a quoted key assignment in a comment is flagged when the value looks like a secret', () => {
+  expectFlag('server/plant.ts', asm([
+    '// old key: ',
+    q,
+    'mlFAKE',
+    'oldkey0001',
+    q,
+  ]), 'api-key');
+  expectFlag('server/plant.ts', asm([
+    '// key = ',
+    dq,
+    'mlFAKE',
+    'oldkey0002',
+    dq,
+  ]), 'api-key');
+  expectClean('server/plant.ts', "// old key: 'address'");
+  expectClean('server/plant.ts', "// key: 'Escape'");
+  expectClean('src/table.ts', "const columns = [{ key: 'address' }, { key: 'Escape' }];");
+});
+
 test('unquoted key assignments in comments are flagged', () => {
   expectFlag('server/plant.ts', asm([
     '// JN_',

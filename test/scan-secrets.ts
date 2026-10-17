@@ -39,6 +39,7 @@ const KEY_NAME = /(?<!\?\s*)(?<![A-Za-z0-9_])(["']?)([A-Za-z_][A-Za-z0-9_-]*)\1\
 const CONFIG_UNQUOTED = /([A-Za-z_][A-Za-z0-9_-]*)\s*(?:=|:)\s*([^\s'"`#,{}[\]<>]+)/g;
 const DOCKER_ENV = /\bENV\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+|=)(['"`]?)([^\s'"`]+)\2/gi;
 const COMMENTED_ASSIGN = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\s'"`;#]+)/g;
+const COMMENTED_BARE_KEY = /(?:^|[^A-Za-z0-9_])key\s*[:=]\s*(?:(['"`])([^'"`\n]+)\1|([^\s'"`;#]+))/gi;
 
 const FUNCTION_WORDS = new Set([
   'a', 'an', 'the', 'is', 'are', 'was', 'were', 'our', 'your', 'to', 'of', 'for',
@@ -244,11 +245,32 @@ function commentBodies(line: string): string[] {
   return bodies;
 }
 
+function hasKnownPrefix(value: string): boolean {
+  KNOWN_PREFIX.lastIndex = 0;
+  const found = KNOWN_PREFIX.test(value);
+  KNOWN_PREFIX.lastIndex = 0;
+  return found;
+}
+
+// Long, mixed, or prefixed. Short words such as "address" and "Escape" are not secrets.
+function isSecretShaped(value: string): boolean {
+  const trimmed = value.trim().replace(/[,;]+$/, '');
+  if (!trimmed || isBenignLiteral(trimmed)) return false;
+  if (hasKnownPrefix(trimmed)) return true;
+  if (trimmed.length < 12) return false;
+  if (/^[a-z]+$/.test(trimmed) || /^[A-Z]+$/.test(trimmed)) return false;
+  return /\d/.test(trimmed) || (/[a-z]/.test(trimmed) && /[A-Z]/.test(trimmed)) || /[^A-Za-z0-9]/.test(trimmed);
+}
+
 function commentedAssignmentKind(line: string): SecretKind | null {
   for (const body of commentBodies(line)) {
     for (const match of allMatches(COMMENTED_ASSIGN, body)) {
       const value = match[2].replace(/[,;]+$/, '');
       if (isCredentialName(match[1]) && isConcreteSecret(value)) return kindForName(match[1]);
+    }
+    for (const match of allMatches(COMMENTED_BARE_KEY, body)) {
+      const value = match[2] || match[3] || '';
+      if (isSecretShaped(value)) return 'api-key';
     }
   }
   return null;
