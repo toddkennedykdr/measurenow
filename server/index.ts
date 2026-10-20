@@ -10,6 +10,7 @@ import { authRouter } from './routes/auth';
 import { reportsRouter } from './routes/reports';
 import { jnRouter, warnIfJobNimbusUnconfigured } from './routes/jobnimbus';
 import { mountRoofRoutes } from './mountRoof';
+import { malformedJsonHandler } from './middleware/jsonError';
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: '10mb' }));
+app.use(malformedJsonHandler);
 
 // Session signing key is required. No literal fallback.
 const sessionSecret = process.env.SESSION_SECRET;

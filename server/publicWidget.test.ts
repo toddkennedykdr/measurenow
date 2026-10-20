@@ -184,6 +184,71 @@ describe('public quote widget', { concurrency: false }, () => {
     });
   });
 
+  it('treats whitespace around either key as the same solar key', async () => {
+    const around = [' ', JN_API_KEY_DUMMY, ' '].join('');
+    const edges = ['\n', JN_API_KEY_DUMMY, '\t'].join('');
+    const gap = [JN_API_KEY_DUMMY.slice(0, 6), ' ', JN_API_KEY_DUMMY.slice(6)].join('');
+    const paddedBrowser = ['  ', ENV_EXAMPLE_API_KEY_PLACEHOLDER, '  '].join('');
+    process.env.GOOGLE_SOLAR_API_KEY = around;
+    process.env.GOOGLE_MAPS_BROWSER_KEY = edges;
+    await withServer(async (base) => {
+      const padded = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.84' },
+      }));
+      assert.equal(padded.status, 200);
+      assert.deepEqual(JSON.parse(padded.text), { key: '' });
+    });
+
+    process.env.GOOGLE_SOLAR_API_KEY = JN_API_KEY_DUMMY;
+    process.env.GOOGLE_MAPS_BROWSER_KEY = gap;
+    await withServer(async (base) => {
+      const split = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.85' },
+      }));
+      assert.equal(split.status, 200);
+      assert.deepEqual(JSON.parse(split.text), { key: '' });
+    });
+
+    process.env.GOOGLE_SOLAR_API_KEY = JN_API_KEY_DUMMY;
+    process.env.GOOGLE_MAPS_BROWSER_KEY = paddedBrowser;
+    await withServer(async (base) => {
+      const other = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.86' },
+      }));
+      assert.equal(other.status, 200);
+      assert.deepEqual(JSON.parse(other.text), { key: ENV_EXAMPLE_API_KEY_PLACEHOLDER });
+    });
+  });
+
+  it('withholds the solar key when quotes, commas, or case hide it', async () => {
+    const solar = JN_API_KEY_DUMMY;
+    const upper = solar.toUpperCase();
+    const cases = [
+      ['"', upper, '"'].join(''),
+      ["'", upper, "'"].join(''),
+      [upper, ','].join(''),
+      solar.toLowerCase(),
+      ['prefix-', upper, '-suffix'].join(''),
+    ];
+    process.env.GOOGLE_SOLAR_API_KEY = upper;
+    await withServer(async (base) => {
+      for (let i = 0; i < cases.length; i++) {
+        process.env.GOOGLE_MAPS_BROWSER_KEY = cases[i];
+        const res = await read(await fetch(`${base}/api/roof/maps-key`, {
+          headers: { 'x-forwarded-for': `203.0.113.${120 + i}` },
+        }));
+        assert.equal(res.status, 200, cases[i]);
+        assert.deepEqual(JSON.parse(res.text), { key: '' });
+      }
+      process.env.GOOGLE_MAPS_BROWSER_KEY = ['  ', ENV_EXAMPLE_API_KEY_PLACEHOLDER, '  '].join('');
+      const other = await read(await fetch(`${base}/api/roof/maps-key`, {
+        headers: { 'x-forwarded-for': '203.0.113.130' },
+      }));
+      assert.equal(other.status, 200);
+      assert.deepEqual(JSON.parse(other.text), { key: ENV_EXAMPLE_API_KEY_PLACEHOLDER });
+    });
+  });
+
   it('returns 401 for staff roof routes when logged out', async () => {
     await withServer(async (base) => {
       const ip = { 'x-forwarded-for': '203.0.113.82', 'content-type': 'application/json' };
