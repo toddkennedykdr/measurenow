@@ -1,27 +1,75 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { buildSharePayload, copyTextFor, shareQuote } from '../src/shareQuote.ts';
+import { buildSharePayload, copyTextFor, publicInspectUrl, shareQuote } from '../src/shareQuote.ts';
 import { conditionColor, severityColor } from '../src/statusColors.ts';
 
+const pageUrl = publicInspectUrl('https://example.com', '123 Main St, Raleigh, NC');
 const payload = buildSharePayload({
   address: '123 Main St, Raleigh, NC',
   lowLabel: '$10,000',
   highLabel: '$12,000',
   detail: '2,000 sq ft · 20 squares · 6/12 pitch',
-  pageUrl: 'https://example.com/reports/1',
+  pageUrl,
 });
 
-test('share payload is the on-screen summary and page link only', () => {
+function sharedText(value: { text: string; url: string }): string {
+  return `${value.text}\n${value.url}`;
+}
+
+test('share payload is the on-screen summary and public page link only', () => {
   assert.deepEqual(Object.keys(payload).sort(), ['text', 'title', 'url']);
   assert.equal(payload.title, 'K&D Roofing quote');
-  assert.match(payload.text, /K&D Roofing/);
-  assert.match(payload.text, /123 Main St, Raleigh, NC/);
-  assert.match(payload.text, /\$10,000 – \$12,000/);
-  assert.match(payload.text, /2,000 sq ft/);
-  assert.equal(payload.url, 'https://example.com/reports/1');
-  assert.doesNotMatch(payload.text, /@/);
-  assert.doesNotMatch(`${payload.text}\n${payload.url}`, /api[_-]?key|password|secret/i);
+  assert.equal(payload.text, [
+    'K&D Roofing',
+    '123 Main St, Raleigh, NC',
+    '$10,000 – $12,000',
+    '2,000 sq ft · 20 squares · 6/12 pitch',
+  ].join('\n'));
+  const parsed = new URL(payload.url);
+  assert.equal(parsed.origin, 'https://example.com');
+  assert.equal(parsed.pathname, '/inspect');
+  assert.equal(parsed.searchParams.get('address'), '123 Main St, Raleigh, NC');
+  const shared = sharedText(payload);
+  assert.doesNotMatch(shared, /\/reports(\/|$|\?)/);
+  assert.doesNotMatch(shared, /@/);
+  assert.doesNotMatch(shared, /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/);
+  assert.doesNotMatch(shared, /api[_-]?key|password|secret/i);
+});
+
+test('a staff report URL is replaced with the public inspect link', () => {
+  const staffUrls = [
+    'https://example.com/reports/1',
+    'https://example.com/reports/1/',
+    'https://example.com/reports',
+    'https://example.com/reports/1?email=person@example.com&phone=9195550100',
+  ];
+  for (const staffUrl of staffUrls) {
+    const replaced = buildSharePayload({
+      address: '123 Main St, Raleigh, NC',
+      lowLabel: '$10,000',
+      highLabel: '$12,000',
+      detail: '2,000 sq ft · 20 squares',
+      pageUrl: staffUrl,
+    });
+    assert.equal(replaced.url, pageUrl);
+    const shared = sharedText(replaced);
+    assert.doesNotMatch(shared, /\/reports(\/|$|\?)/);
+    assert.doesNotMatch(shared, /@/);
+    assert.doesNotMatch(shared, /9195550100/);
+    assert.doesNotMatch(shared, /person@example.com/);
+  }
+});
+
+test('a public quote URL is left unchanged', () => {
+  const quoteUrl = 'https://example.com/quote';
+  const quote = buildSharePayload({
+    address: '123 Main St, Raleigh, NC',
+    lowLabel: '$10,000',
+    highLabel: '$12,000',
+    pageUrl: quoteUrl,
+  });
+  assert.equal(quote.url, quoteUrl);
 });
 
 test('cancelling the share sheet does not copy', async () => {
@@ -45,7 +93,8 @@ test('missing Web Share copies the summary and link', async () => {
   });
   assert.equal(result, 'copied');
   assert.equal(copied, copyTextFor(payload));
-  assert.match(copied, /https:\/\/example\.com\/reports\/1/);
+  assert.match(copied, /https:\/\/example\.com\/inspect\?address=/);
+  assert.doesNotMatch(copied, /\/reports(\/|$|\?)/);
 });
 
 test('a hanging clipboard uses the legacy copy', async () => {
@@ -105,6 +154,29 @@ test('the rep inspection address box is focused when that step shows', () => {
   const src = readFileSync(new URL('../src/pages/InspectPage.tsx', import.meta.url), 'utf8');
   assert.match(src, /addressRef\.current\?\.focus\(\)/);
   assert.match(src, /id="inspect-address"/);
+});
+
+test('inspection share uses the public inspect link', () => {
+  const src = readFileSync(new URL('../src/pages/InspectPage.tsx', import.meta.url), 'utf8');
+  const start = src.indexOf('<ShareQuoteButton');
+  const end = src.indexOf('/>', start);
+  assert.ok(start !== -1 && end > start);
+  const block = src.slice(start, end);
+  assert.match(block, /publicInspectUrl\(window\.location\.origin,\s*address\)/);
+  assert.doesNotMatch(block, /\/reports\//);
+  assert.doesNotMatch(block, /savedReportId|repEmail|customerName|\bphone\b|\bemail\b/i);
+  assert.doesNotMatch(src, /\/reports\/\$\{/);
+});
+
+test('saved report share uses the public inspect link', () => {
+  const src = readFileSync(new URL('../src/pages/ReportDetailPage.tsx', import.meta.url), 'utf8');
+  const start = src.indexOf('<ShareQuoteButton');
+  const end = src.indexOf('/>', start);
+  assert.ok(start !== -1 && end > start);
+  const block = src.slice(start, end);
+  assert.match(block, /publicInspectUrl\(window\.location\.origin,\s*address\)/);
+  assert.doesNotMatch(block, /\/reports\//);
+  assert.doesNotMatch(block, /customerName|\bphone\b|\bemail\b/i);
 });
 
 test('customer phone copy uses the K&D Roofing number', () => {

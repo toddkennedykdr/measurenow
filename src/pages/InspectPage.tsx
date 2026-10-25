@@ -5,7 +5,7 @@ import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
 import { ShareQuoteButton } from '../components/ShareQuoteButton';
 import { useAuth } from '../context/AuthContext';
-import { buildSharePayload } from '../shareQuote';
+import { buildSharePayload, publicInspectUrl } from '../shareQuote';
 import { conditionColor, severityColor } from '../statusColors';
 
 // Types
@@ -161,7 +161,6 @@ export default function InspectPage() {
   const [reportSent, setReportSent] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [showJN, setShowJN] = useState(false);
-  const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const { user } = useAuth();
 
   const mapRef = useRef<HTMLDivElement>(null);
@@ -302,14 +301,12 @@ export default function InspectPage() {
           ...extraPhotos.map(p => p.file),
         ];
         const thumbnails = await Promise.all(allFiles.map(f => fileToThumbnail(f)));
-        const saveRes = await fetch('/api/reports', {
+        await fetch('/api/reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote, photos: thumbnails }),
         });
-        const saveData = await saveRes.json();
-        if (saveData.id) setSavedReportId(saveData.id);
       } catch {}
     } catch (err: any) {
       setError(err.message || 'Analysis failed');
@@ -606,7 +603,7 @@ export default function InspectPage() {
                 lowLabel: formatPrice(adjLow + sidingLow),
                 highLabel: formatPrice(adjHigh + sidingHigh),
                 detail: `${roofArea.toLocaleString()} sq ft · ${roofSquares} squares`,
-                pageUrl: savedReportId ? `${window.location.origin}/reports/${savedReportId}` : window.location.href,
+                pageUrl: publicInspectUrl(window.location.origin, address),
               })}
             />
             {user && (

@@ -5,7 +5,7 @@ import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
 import { ShareQuoteButton } from '../components/ShareQuoteButton';
 import { useAuth } from '../context/AuthContext';
-import { buildSharePayload } from '../shareQuote';
+import { buildSharePayload, publicInspectUrl } from '../shareQuote';
 import { conditionColor, severityColor } from '../statusColors';
 
 function formatPrice(n: number) { return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }); }
@@ -101,7 +101,7 @@ export default function ReportDetailPage() {
               lowLabel: formatPrice(adjLow + sidingLow),
               highLabel: formatPrice(adjHigh + sidingHigh),
               detail: `${roofArea.toLocaleString()} sq ft · ${roofSquares} squares`,
-              pageUrl: window.location.href,
+              pageUrl: publicInspectUrl(window.location.origin, address),
             })}
           />
           <button className="btn btn--secondary" onClick={() => setShowJN(true)}>📤 Send to JobNimbus</button>
