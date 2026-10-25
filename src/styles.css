@@ -113,6 +113,15 @@ body {
   border-color: var(--red);
 }
 
+/* Off-screen honeypot. Not display:none, so simple fillers still see the field. */
+.hp-field {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

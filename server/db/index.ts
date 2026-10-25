@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import * as schema from './schema';
 import { SEED_USERS, seedPasswordFromEnv } from './seedUsers';
+import { applyWebsiteLeadSchema } from './websiteLeadSchema';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://localhost:5432/measurenow';
 
@@ -35,6 +36,9 @@ export async function initDb() {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+
+  // New table and columns only. Safe to run on every boot.
+  await applyWebsiteLeadSchema((sql) => pool.query(sql));
 
   // Add is_admin column if missing (migration)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;`);

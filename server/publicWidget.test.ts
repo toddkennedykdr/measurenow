@@ -90,6 +90,10 @@ async function withServer(fn: (base: string) => Promise<void>) {
   }
 }
 
+function publicBody(fields: Record<string, unknown>): string {
+  return JSON.stringify({ formStartedAt: Date.now() - 60_000, ...fields });
+}
+
 function headerText(res: Response): string {
   return [...res.headers.entries()].map(([name, value]) => `${name}: ${value}`).join('\n');
 }
@@ -147,7 +151,7 @@ describe('public quote widget', { concurrency: false }, () => {
       const geocode = await read(await fetch(`${base}/api/roof/geocode`, {
         method: 'POST',
         headers: { ...ip, 'content-type': 'application/json' },
-        body: JSON.stringify({ address: '123 Main St, Raleigh, NC' }),
+        body: publicBody({ address: '123 Main St, Raleigh, NC' }),
       }));
       assert.equal(geocode.status, 200);
       const located = JSON.parse(geocode.text) as { address: string; lat: number; lng: number };
@@ -159,7 +163,7 @@ describe('public quote widget', { concurrency: false }, () => {
       const quote = await read(await fetch(`${base}/api/roof/quote`, {
         method: 'POST',
         headers: { ...ip, 'content-type': 'application/json', [wrongKey]: 'nope' },
-        body: JSON.stringify({ lat: located.lat, lng: located.lng }),
+        body: publicBody({ lat: located.lat, lng: located.lng }),
       }));
       assert.equal(quote.status, 200);
       const quoted = JSON.parse(quote.text) as { quote: { lowEstimate: number } };

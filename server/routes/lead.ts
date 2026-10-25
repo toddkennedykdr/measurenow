@@ -1,23 +1,45 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { websiteLeadStore } from '../db/websiteLeads';
+import { leadCaptureRateLimit } from '../leadRateLimit';
+import { LEAD_SAVE_ERROR, rejectIfSpam } from '../spamGuard';
 
 export const leadRouter = Router();
 
-const leadSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  email: z.string().email('Please enter a valid email'),
-  phone: z.string().min(7, 'Please enter a valid phone number'),
-  address: z.string().min(5),
-  quoteLow: z.number(),
-  quoteHigh: z.number(),
-  roofSqFt: z.number(),
-  roofSquares: z.number(),
-  avgPitchDegrees: z.number().optional(),
-  pitchOver12: z.number().optional(),
-});
+const quoteDetail = 'Please check the quote details and try again.';
 
-// In-memory store for now
-const leads: z.infer<typeof leadSchema>[] = [];
+function money(max: number) {
+  return z.number({ invalid_type_error: quoteDetail, required_error: quoteDetail })
+    .refine((value) => Number.isFinite(value) && value >= 0 && value <= max, quoteDetail);
+}
+
+function positiveMeasure(max: number) {
+  return z.number({ invalid_type_error: quoteDetail, required_error: quoteDetail })
+    .refine((value) => Number.isFinite(value) && value > 0 && value <= max, quoteDetail);
+}
+
+function optionalRange(max: number) {
+  return z.number({ invalid_type_error: quoteDetail, required_error: quoteDetail })
+    .refine((value) => Number.isFinite(value) && value >= 0 && value <= max, quoteDetail)
+    .optional();
+}
+
+const leadSchema = z.object({
+  name: z.string().trim().min(1, 'Please enter your name.').max(100, 'Please enter a shorter name.'),
+  email: z.string().trim().email('Please enter a valid email.').max(254, 'Please enter a shorter email.'),
+  phone: z.string().trim().min(7, 'Please enter a valid phone number.').max(40, 'Please enter a shorter phone number.'),
+  address: z.string().trim().min(5, 'Please enter a valid address.').max(300, 'Please enter a shorter address.'),
+  quoteLow: money(10_000_000),
+  quoteHigh: money(10_000_000),
+  roofSqFt: positiveMeasure(5_000_000),
+  roofSquares: positiveMeasure(50_000),
+  avgPitchDegrees: optionalRange(90),
+  pitchOver12: optionalRange(48),
+}).superRefine((lead, ctx) => {
+  if (lead.quoteHigh < lead.quoteLow) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: quoteDetail });
+  }
+});
 
 async function sendEmailNotification(lead: z.infer<typeof leadSchema>) {
   const apiKey = process.env.RESEND_API_KEY;
@@ -117,15 +139,17 @@ async function pushToJobNimbus(lead: z.infer<typeof leadSchema>) {
   }
 }
 
-leadRouter.post('/capture', async (req: Request, res: Response) => {
+leadRouter.post('/capture', leadCaptureRateLimit, async (req: Request, res: Response) => {
   try {
+    if (rejectIfSpam(req.body, res)) return;
+
     const parsed = leadSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
     }
 
     const lead = parsed.data;
-    leads.push(lead);
+    await websiteLeadStore().insert(lead);
 
     console.log(`📋 New lead captured: ${lead.name} — ${lead.address} — $${lead.quoteLow.toLocaleString()}-$${lead.quoteHigh.toLocaleString()}`);
 
@@ -136,11 +160,17 @@ leadRouter.post('/capture', async (req: Request, res: Response) => {
     return res.json({ success: true, message: 'Lead captured successfully' });
   } catch (err: any) {
     console.error('Lead capture error:', err.message || err);
-    return res.status(500).json({ error: 'Failed to save your information. Please call us directly.' });
+    return res.status(500).json({ error: LEAD_SAVE_ERROR });
   }
 });
 
-// Admin endpoint to view leads (protect in production)
-leadRouter.get('/list', (_req: Request, res: Response) => {
-  return res.json({ count: leads.length, leads });
+// Same list endpoint as before. Rows now come from website_leads.
+leadRouter.get('/list', async (_req: Request, res: Response) => {
+  try {
+    const leads = await websiteLeadStore().list();
+    return res.json({ count: leads.length, leads });
+  } catch (err: any) {
+    console.error('Lead list error:', err.message || err);
+    return res.status(500).json({ error: 'Failed to load leads.' });
+  }
 });
