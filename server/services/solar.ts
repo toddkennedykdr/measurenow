@@ -51,8 +51,9 @@ export async function getBuildingInsights(
   lng: number
 ): Promise<BuildingRoofData | null> {
   // Try HIGH quality first, then fall back.
-  // A 404 or an empty segment list is "no roof data". Any other failure is the map service.
-  let serviceFailed = false;
+  // 404 and an empty segment list are no roof data. Throw only when every
+  // quality we tried failed as a service error.
+  const outcomes: Array<'service' | 'missing'> = [];
   for (const quality of ['HIGH', 'MEDIUM'] as const) {
     const url = new URL('https://solar.googleapis.com/v1/buildingInsights:findClosest');
     url.searchParams.set('location.latitude', lat.toString());
@@ -65,14 +66,17 @@ export async function getBuildingInsights(
       res = await fetch(url.toString());
     } catch {
       // The thrown error can include the request URL, which carries the API key.
-      serviceFailed = true;
+      outcomes.push('service');
       console.error(`Solar API error (${quality}): network`);
       continue;
     }
-    if (res.status === 404) continue; // quality not available, try next
+    if (res.status === 404) {
+      outcomes.push('missing');
+      continue;
+    }
     if (!res.ok) {
       // Status only. The request URL, and some error bodies, contain the API key.
-      serviceFailed = true;
+      outcomes.push('service');
       console.error(`Solar API error (${quality}):`, res.status);
       continue;
     }
@@ -81,12 +85,15 @@ export async function getBuildingInsights(
     try {
       data = await res.json();
     } catch {
-      serviceFailed = true;
+      outcomes.push('service');
       console.error(`Solar API error (${quality}): invalid response`);
       continue;
     }
     const solar = data.solarPotential;
-    if (!solar?.roofSegmentStats?.length) continue;
+    if (!solar?.roofSegmentStats?.length) {
+      outcomes.push('missing');
+      continue;
+    }
 
     const segments: RoofSegment[] = solar.roofSegmentStats.map((seg: any) => ({
       areaSqFt: (seg.stats?.areaMeters2 || 0) * SQ_M_TO_SQ_FT,
@@ -151,6 +158,8 @@ export async function getBuildingInsights(
     };
   }
 
-  if (serviceFailed) throw new MapServiceError();
+  if (outcomes.length > 0 && outcomes.every((outcome) => outcome === 'service')) {
+    throw new MapServiceError();
+  }
   return null;
 }
