@@ -79,3 +79,11 @@ npm run check-deploy -- https://your-host.example <git-sha>
 ```
 
 Leave the sha off to use local `main` (`refs/heads/main`, then `origin/main`). The script sends one GET to the base URL plus `/api/health`. It exits 0 when the commit matches and `ok` is true. It exits non-zero when the commit differs, when `ok` is false, or when the response cannot be read. `npm test` covers this with a mocked fetch and does not call a deployed host.
+
+## Lead rate limit
+
+`POST /api/lead/capture` allows 5 accepted submissions every 10 minutes. The key is the full IPv4 address, or the /64 network for an IPv6 address. Honeypot and validation failures are not counted.
+
+`X-Forwarded-For` is used only when the TCP peer is the one expected proxy hop: loopback (`127.0.0.0/8` or `::1`), link-local, unique-local IPv6, or a private IPv4 range (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`), including an IPv4-mapped form of those addresses. The key is then the last forwarded address, which is the address that hop appended. A public peer is limited by its socket address, so it cannot open another bucket by changing the header.
+
+The process must not be reachable from the public internet except through a proxy that connects from one of those ranges. `trust proxy` stays at 1 so other limits can still see the visitor behind that hop.
