@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { roofApiKeyMatches } from '../middleware/roofAccess';
 import { rejectIfPublicDailyCap } from '../publicDailyCap';
 import { geocodeAddress } from '../services/geocode';
+import { MAP_SERVICE_ERROR, MapServiceError } from '../services/mapService';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote, type RoofQuote } from '../services/pricing';
 import { rejectIfSpam } from '../spamGuard';
@@ -63,8 +64,12 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
       lat: location.lat,
       lng: location.lng,
     });
-  } catch (err: any) {
-    console.error('Geocode error:', err.message || err);
+  } catch (err: unknown) {
+    if (err instanceof MapServiceError) {
+      console.error('Geocode error: map service unavailable');
+      return res.status(503).json({ error: MAP_SERVICE_ERROR });
+    }
+    console.error('Geocode error:', err instanceof Error ? err.name : 'Error');
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
@@ -105,8 +110,12 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
       },
       quote,
     });
-  } catch (err: any) {
-    console.error('Quote error:', err.message || err);
+  } catch (err: unknown) {
+    if (err instanceof MapServiceError) {
+      console.error('Quote error: map service unavailable');
+      return res.status(503).json({ error: MAP_SERVICE_ERROR });
+    }
+    console.error('Quote error:', err instanceof Error ? err.name : 'Error');
     return res.status(500).json({
       error: 'Something went wrong generating your quote. Please try again or call us directly.',
     });

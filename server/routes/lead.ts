@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { websiteLeadStore } from '../db/websiteLeads';
 import { leadCaptureRateLimit } from '../leadRateLimit';
@@ -164,8 +164,17 @@ leadRouter.post('/capture', leadCaptureRateLimit, async (req: Request, res: Resp
   }
 });
 
-// Same list endpoint as before. Rows now come from website_leads.
-leadRouter.get('/list', async (_req: Request, res: Response) => {
+function requireLogin(req: Request, res: Response, next: NextFunction): void {
+  if (!(req.session as { userId?: number } | undefined)?.userId) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  next();
+}
+
+// Same session check the report routes use. Rows come from website_leads.
+// Capturing a quote stays public. A roof API key is not a session.
+leadRouter.get('/list', requireLogin, async (_req: Request, res: Response) => {
   try {
     const leads = await websiteLeadStore().list();
     return res.json({ count: leads.length, leads });

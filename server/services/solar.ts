@@ -1,3 +1,5 @@
+import { MapServiceError } from './mapService';
+
 const SQ_M_TO_SQ_FT = 10.764;
 
 /** Read at call time so dotenv and tests can set the key before a request. */
@@ -48,7 +50,9 @@ export async function getBuildingInsights(
   lat: number,
   lng: number
 ): Promise<BuildingRoofData | null> {
-  // Try HIGH quality first, then fall back
+  // Try HIGH quality first, then fall back.
+  // A 404 or an empty segment list is "no roof data". Any other failure is the map service.
+  let serviceFailed = false;
   for (const quality of ['HIGH', 'MEDIUM'] as const) {
     const url = new URL('https://solar.googleapis.com/v1/buildingInsights:findClosest');
     url.searchParams.set('location.latitude', lat.toString());
@@ -56,15 +60,31 @@ export async function getBuildingInsights(
     url.searchParams.set('requiredQuality', quality);
     url.searchParams.set('key', googleSolarApiKey());
 
-    const res = await fetch(url.toString());
+    let res: Response;
+    try {
+      res = await fetch(url.toString());
+    } catch {
+      // The thrown error can include the request URL, which carries the API key.
+      serviceFailed = true;
+      console.error(`Solar API error (${quality}): network`);
+      continue;
+    }
     if (res.status === 404) continue; // quality not available, try next
     if (!res.ok) {
       // Status only. The request URL, and some error bodies, contain the API key.
+      serviceFailed = true;
       console.error(`Solar API error (${quality}):`, res.status);
       continue;
     }
 
-    const data: any = await res.json();
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      serviceFailed = true;
+      console.error(`Solar API error (${quality}): invalid response`);
+      continue;
+    }
     const solar = data.solarPotential;
     if (!solar?.roofSegmentStats?.length) continue;
 
@@ -131,5 +151,6 @@ export async function getBuildingInsights(
     };
   }
 
+  if (serviceFailed) throw new MapServiceError();
   return null;
 }

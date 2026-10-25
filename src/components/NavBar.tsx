@@ -42,10 +42,7 @@ export function NavBar() {
           <Link to="/inspect" style={linkStyle(path === '/inspect')}>🔍 Inspect</Link>
         </>
       ) : (
-        <>
-          <Link to="/" style={linkStyle(path === '/' || path === '/quote')}>⚡ Instant Quote</Link>
-          <Link to="/inspect" style={linkStyle(path === '/inspect')}>🔍 Inspection Tool</Link>
-        </>
+        <Link to="/" style={linkStyle(path === '/' || path === '/quote')}>⚡ Instant Quote</Link>
       )}
       <div style={{ flex: 1 }} />
       {user ? (
