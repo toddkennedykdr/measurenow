@@ -48,6 +48,19 @@ test('missing Web Share copies the summary and link', async () => {
   assert.match(copied, /https:\/\/example\.com\/reports\/1/);
 });
 
+test('a hanging clipboard uses the legacy copy', async () => {
+  let legacy = '';
+  const result = await shareQuote(payload, {
+    clipboard: { writeText: () => new Promise(() => {}) },
+    legacyCopy: (text) => {
+      legacy = text;
+      return true;
+    },
+  });
+  assert.equal(result, 'copied');
+  assert.equal(legacy, copyTextFor(payload));
+});
+
 test('a failed share falls back to copy', async () => {
   let copied = '';
   const result = await shareQuote(payload, {

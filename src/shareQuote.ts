@@ -7,6 +7,7 @@ export interface SharePayload {
 export interface ShareEnv {
   share?: (data: { title?: string; text?: string; url?: string }) => Promise<void>;
   clipboard?: { writeText: (text: string) => Promise<void> };
+  legacyCopy?: (text: string) => boolean;
 }
 
 export function buildSharePayload(input: {
@@ -44,10 +45,19 @@ export async function shareQuote(payload: SharePayload, env: ShareEnv): Promise<
     }
   }
 
+  const text = copyTextFor(payload);
   const write = env.clipboard?.writeText;
-  if (typeof write !== 'function') {
-    throw new Error('Share is unavailable on this device.');
+  if (typeof write === 'function') {
+    try {
+      await Promise.race([
+        Promise.resolve(write.call(env.clipboard, text)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200)),
+      ]);
+      return 'copied';
+    } catch {
+      // The clipboard API can hang or refuse. Try the legacy copy next.
+    }
   }
-  await write.call(env.clipboard, copyTextFor(payload));
-  return 'copied';
+  if (env.legacyCopy?.(text)) return 'copied';
+  throw new Error('Share is unavailable on this device.');
 }
