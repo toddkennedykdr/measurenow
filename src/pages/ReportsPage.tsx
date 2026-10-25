@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { useAuth } from '../context/AuthContext';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
 
 interface Report {
   id: number;
@@ -15,6 +16,14 @@ function conditionColor(c: string) {
   if (c === 'poor') return '#E2312B';
   if (c === 'fair') return '#ca8a04';
   return '#16a34a';
+}
+
+export function ReportListMeta({ date, sqft }: { date: string; sqft?: number | null }) {
+  return (
+    <div style={{ fontSize: 12, color: '#6b7280' }}>
+      {date}{sqft ? ` · ${sqft.toLocaleString()} sq ft · ${AI_ESTIMATE_LABEL}` : ''}
+    </div>
+  );
 }
 
 export default function ReportsPage() {
@@ -65,9 +74,7 @@ export default function ReportsPage() {
                       {condition.toUpperCase()}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>
-                    {date}{sqft ? ` · ${sqft.toLocaleString()} sq ft` : ''}
-                  </div>
+                  <ReportListMeta date={date} sqft={sqft} />
                 </div>
               </Link>
             );
