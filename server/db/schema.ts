@@ -9,6 +9,21 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+export const websiteLeads = pgTable('website_leads', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  phone: text('phone').notNull(),
+  address: text('address').notNull(),
+  quoteLow: real('quote_low').notNull(),
+  quoteHigh: real('quote_high').notNull(),
+  roofSqFt: real('roof_sq_ft').notNull(),
+  roofSquares: real('roof_squares').notNull(),
+  avgPitchDegrees: real('avg_pitch_degrees'),
+  pitchOver12: real('pitch_over_12'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 export const reports = pgTable('reports', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),

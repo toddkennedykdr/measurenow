@@ -4,12 +4,23 @@ import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import * as schema from './schema';
 import { SEED_USERS, seedPasswordFromEnv } from './seedUsers';
+import { applyWebsiteLeadSchema } from './websiteLeadSchema';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://localhost:5432/measurenow';
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 
 export const db: NodePgDatabase<typeof schema> = drizzle(pool, { schema });
+
+/** Read-only check for GET /api/health. Does not create tables or write rows. */
+export async function pingDatabase(): Promise<boolean> {
+  try {
+    const result = await pool.query('SELECT 1');
+    return result.rows.length === 1;
+  } catch {
+    return false;
+  }
+}
 
 export async function initDb() {
   // Create tables
@@ -35,6 +46,9 @@ export async function initDb() {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+
+  // New table and columns only. Safe to run on every boot.
+  await applyWebsiteLeadSchema((sql) => pool.query(sql));
 
   // Add is_admin column if missing (migration)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;`);

@@ -25,22 +25,36 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <form onSubmit={handleSubmit} style={{ background: 'white', borderRadius: 12, padding: '40px 32px', boxShadow: '0 4px 24px rgba(0,0,0,0.1)', width: '100%', maxWidth: 380 }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ fontSize: 28, fontWeight: 800, color: '#032D59' }}>K&D <span style={{ color: '#E2312B' }}>Roofing</span></div>
-          <div style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>MeasureNow Inspector Login</div>
+    <div className="login-screen">
+      <form className="card login-card" onSubmit={handleSubmit}>
+        <header className="header">
+          <div className="header__logo">K&amp;D <span>Roofing</span></div>
+          <div className="header__tagline">MeasureNow inspector login</div>
+        </header>
+        {error && <div className="error-msg">{error}</div>}
+        <div className="form-group">
+          <label htmlFor="username">Username</label>
+          <input
+            id="username"
+            className="input"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            autoComplete="username"
+            autoFocus
+          />
         </div>
-        {error && <div style={{ background: '#fef2f2', color: '#E2312B', padding: '8px 12px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>{error}</div>}
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Username</label>
-          <input value={username} onChange={e => setUsername(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 15, boxSizing: 'border-box' }} autoFocus />
+        <div className="form-group">
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            className="input"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
         </div>
-        <div style={{ marginBottom: 24 }}>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Password</label>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 15, boxSizing: 'border-box' }} />
-        </div>
-        <button type="submit" disabled={loading} style={{ width: '100%', padding: '12px', background: '#032D59', color: 'white', border: 'none', borderRadius: 6, fontSize: 15, fontWeight: 600, cursor: 'pointer', opacity: loading ? 0.7 : 1 }}>
+        <button type="submit" className="btn btn--primary" disabled={loading}>
           {loading ? 'Signing in...' : 'Sign In'}
         </button>
       </form>

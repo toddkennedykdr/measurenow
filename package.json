@@ -10,7 +10,8 @@
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/index.js",
     "preview": "vite preview",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "check-deploy": "node scripts/check-deploy.mjs"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",
