@@ -5,6 +5,7 @@ import { rejectIfPublicDailyCap } from '../publicDailyCap';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote, type RoofQuote } from '../services/pricing';
+import { rejectIfSpam } from '../spamGuard';
 
 export const roofRouter = Router();
 
@@ -31,17 +32,19 @@ function skipsPublicDailyCap(req: Request): boolean {
 }
 
 const addressSchema = z.object({
-  address: z.string().min(5, 'Please enter a valid address'),
+  address: z.string().trim().min(5, 'Please enter a valid address').max(300, 'Please enter a shorter address.'),
 });
 
 const quoteSchema = z.object({
-  lat: z.number(),
-  lng: z.number(),
+  lat: z.number().finite().min(-90).max(90),
+  lng: z.number().finite().min(-180).max(180),
 });
 
 // Step 1: Geocode only — returns lat/lng and formatted address
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
   try {
+    // Per-IP limiting stays on roofRateLimit (req.ip, one trusted proxy hop).
+    if (rejectIfSpam(req.body, res)) return;
     const parsed = addressSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -69,6 +72,7 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
 // Step 2: Get quote using confirmed lat/lng
 roofRouter.post('/quote', async (req: Request, res: Response) => {
   try {
+    if (rejectIfSpam(req.body, res)) return;
     const parsed = quoteSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid coordinates.' });

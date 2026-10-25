@@ -4,6 +4,8 @@ import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
 import { useAuth } from '../context/AuthContext';
+import { HoneypotField } from '../components/HoneypotField';
+import { usePublicFormGuard } from '../publicFormGuard';
 
 // Types
 interface PhotoSlot {
@@ -172,6 +174,7 @@ export default function InspectPage() {
   const [showJN, setShowJN] = useState(false);
   const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const { user } = useAuth();
+  const { companyWebsite, setCompanyWebsite, extras } = usePublicFormGuard();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -194,7 +197,7 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ address: address.trim() }),
+        body: JSON.stringify({ address: address.trim(), ...extras }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -248,7 +251,7 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ lat: useLat, lng: useLng }),
+        body: JSON.stringify({ lat: useLat, lng: useLng, ...extras }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -405,6 +408,7 @@ export default function InspectPage() {
               disabled={loading}
             />
           </div>
+          <HoneypotField id="company-website-inspect" value={companyWebsite} onChange={setCompanyWebsite} />
           <button className="btn btn--primary" onClick={handleGeocode} disabled={loading}>
             {loading && <span className="spinner" />}
             {loading ? 'Finding...' : 'Find Property'}
@@ -421,6 +425,7 @@ export default function InspectPage() {
           {pinDragged && (
             <p className="inspect-pin-note">📌 Pin moved — using updated location</p>
           )}
+          <HoneypotField id="company-website-inspect-confirm" value={companyWebsite} onChange={setCompanyWebsite} />
           <div className="confirm-buttons">
             <button className="btn btn--primary" onClick={handleConfirmLocation} disabled={loading}>
               {loading && <span className="spinner" />}
