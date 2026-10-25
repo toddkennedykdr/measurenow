@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { HoneypotField } from './HoneypotField';
 import { usePublicFormGuard } from '../publicFormGuard';
 import type { FullQuoteData } from '../types';
+import { ShareQuoteButton } from './ShareQuoteButton';
+import { buildSharePayload } from '../shareQuote';
 
 interface Props {
   data: FullQuoteData;
@@ -70,7 +72,9 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         <p className="quote-result__address">📍 {address}</p>
 
         <div className="quote-result__price">
-          {formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}
+          <span>{formatPrice(quote.lowEstimate)}</span>
+          <span aria-hidden="true">–</span>
+          <span>{formatPrice(quote.highEstimate)}</span>
         </div>
         <p className="quote-result__price-label">Estimated roof replacement cost</p>
 
@@ -93,6 +97,16 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           <strong>Includes:</strong> {quote.materialNote}
         </div>
       </div>
+
+      <ShareQuoteButton
+        payload={buildSharePayload({
+          address,
+          lowLabel: formatPrice(quote.lowEstimate),
+          highLabel: formatPrice(quote.highEstimate),
+          detail: `${roofData.totalAreaSqFt.toLocaleString()} sq ft · ${quote.roofSquares} squares · ${quote.pitchOver12}/12 pitch`,
+          pageUrl: window.location.href,
+        })}
+      />
 
       <div className="divider" />
 

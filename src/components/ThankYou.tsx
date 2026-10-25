@@ -29,7 +29,7 @@ export function ThankYou({ name, data, onStartOver }: Props) {
         </p>
 
         <a href="tel:+19199774074" className="thank-you__phone">
-          📞 Call Us Now: 919-977-4074
+          Call K&amp;D Roofing: 919-977-4074
         </a>
 
         <div className="next-steps">
