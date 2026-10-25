@@ -425,9 +425,13 @@ body {
 }
 
 .footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 4px;
   color: var(--navy);
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* ========== INSPECT PAGE ========== */
