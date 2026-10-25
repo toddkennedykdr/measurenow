@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 
 export const leadRouter = Router();
@@ -140,7 +140,15 @@ leadRouter.post('/capture', async (req: Request, res: Response) => {
   }
 });
 
-// Admin endpoint to view leads (protect in production)
-leadRouter.get('/list', (_req: Request, res: Response) => {
+function requireLogin(req: Request, res: Response, next: NextFunction): void {
+  if (!(req.session as { userId?: number } | undefined)?.userId) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  next();
+}
+
+// Same session check the report routes use. Capturing a quote stays public.
+leadRouter.get('/list', requireLogin, (_req: Request, res: Response) => {
   return res.json({ count: leads.length, leads });
 });
