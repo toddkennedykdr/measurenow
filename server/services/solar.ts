@@ -1,4 +1,11 @@
-const SQ_M_TO_SQ_FT = 10.764;
+import {
+  SQ_M_TO_SQ_FT,
+  imageryDateFromSolar,
+  segmentBoxesFromStats,
+  squareFeetFromMeters,
+  type ImageryDateParts,
+  type SegmentBox,
+} from './quoteHonesty';
 
 /** Read at call time so dotenv and tests can set the key before a request. */
 function googleSolarApiKey(): string {
@@ -21,6 +28,16 @@ export interface BuildingRoofData {
   estimatedLength: number;
   estimatedWidth: number;
   boundingBox: { sw: { lat: number; lng: number }; ne: { lat: number; lng: number } } | null;
+  /** Solar imageryDate. Null when the response did not include a usable date. */
+  imageryDate: ImageryDateParts | null;
+  /** Roof-segment boxes used to notice separate structures. Empty when none were returned. */
+  segmentBoxes: SegmentBox[];
+  /** wholeRoofStats roof area in sq ft, or null when omitted. */
+  wholeRoofAreaSqFt: number | null;
+  /** wholeRoofStats ground area in sq ft, or null when omitted. */
+  wholeRoofGroundSqFt: number | null;
+  /** buildingStats ground area in sq ft, or null when omitted. Not a county record. */
+  buildingGroundSqFt: number | null;
 }
 
 /**
@@ -128,6 +145,11 @@ export async function getBuildingInsights(
       estimatedLength: Math.round(estimatedLength),
       estimatedWidth: Math.round(estimatedWidth),
       boundingBox,
+      imageryDate: imageryDateFromSolar(data.imageryDate),
+      segmentBoxes: segmentBoxesFromStats(solar.roofSegmentStats),
+      wholeRoofAreaSqFt: squareFeetFromMeters(solar.wholeRoofStats?.areaMeters2),
+      wholeRoofGroundSqFt: squareFeetFromMeters(solar.wholeRoofStats?.groundAreaMeters2),
+      buildingGroundSqFt: squareFeetFromMeters(solar.buildingStats?.groundAreaMeters2),
     };
   }
 

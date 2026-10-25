@@ -58,6 +58,7 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
       // Get the API key from the server
       const res = await fetch('/api/roof/maps-key', { credentials: 'include' });
       const { key } = await res.json();
+      if (!key) throw new Error('Map unavailable');
       await loadGoogleMaps(key);
 
       if (!mapRef.current) return;

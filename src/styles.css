@@ -222,6 +222,34 @@ body {
   margin-top: 2px;
 }
 
+.ai-estimate-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: #1b5de0;
+}
+
+.ai-estimate-caption,
+.roof-imagery-date {
+  font-size: 13px;
+  color: var(--gray-700);
+  margin: 0 0 12px;
+}
+
+.measure-warning {
+  background: #fff8eb;
+  border: 1px solid #f5a623;
+  color: #0a1628;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0 0 12px;
+}
+
 .quote-material {
   font-size: 13px;
   color: var(--gray-500);

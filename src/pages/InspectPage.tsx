@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
+import { AiEstimateLabel, MeasureWarnings } from '../components/MeasureHonesty';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
 import { useAuth } from '../context/AuthContext';
 
 // Types
@@ -21,6 +23,8 @@ interface RoofData {
   estimatedPerimeterFt?: number;
   estimatedLength?: number;
   estimatedWidth?: number;
+  imageryDateLabel?: string | null;
+  warnings?: { code?: string; message?: string }[];
 }
 
 interface BuildingMeasurements {
@@ -217,6 +221,7 @@ export default function InspectPage() {
     try {
       const res = await fetch('/api/roof/maps-key', { credentials: 'include' });
       const { key } = await res.json();
+      if (!key) return;
       await loadGoogleMaps(key);
       if (!mapRef.current) return;
       const position = { lat, lng };
@@ -439,18 +444,19 @@ export default function InspectPage() {
           {/* Satellite summary mini */}
           {roofData && quote && (
             <div className="inspect-satellite-mini">
+              <MeasureWarnings warnings={roofData.warnings} />
               <div className="quote-stats">
                 <div className="quote-stat">
                   <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
-                  <span className="quote-stat__label">Sq Ft</span>
+                  <span className="quote-stat__label">Sq Ft<AiEstimateLabel /></span>
                 </div>
                 <div className="quote-stat">
                   <span className="quote-stat__value">{quote.roofSquares}</span>
-                  <span className="quote-stat__label">Squares</span>
+                  <span className="quote-stat__label">Squares<AiEstimateLabel /></span>
                 </div>
                 <div className="quote-stat">
                   <span className="quote-stat__value">{quote.pitchOver12}/12</span>
-                  <span className="quote-stat__label">{quote.pitchCategory}</span>
+                  <span className="quote-stat__label">{quote.pitchCategory}<AiEstimateLabel /></span>
                 </div>
               </div>
             </div>
@@ -651,14 +657,17 @@ export default function InspectPage() {
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.buildingLength}' × {buildingMeasurements.buildingWidth}'</span>
                   <span className="hover-measurement__label">Building Dimensions</span>
+                  <AiEstimateLabel />
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.footprintSqFt.toLocaleString()}</span>
                   <span className="hover-measurement__label">Footprint (sq ft)</span>
+                  <AiEstimateLabel />
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.buildingPerimeter}'</span>
                   <span className="hover-measurement__label">Perimeter</span>
+                  <AiEstimateLabel />
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.stories} × {buildingMeasurements.wallHeightPerStory}'</span>
@@ -671,14 +680,17 @@ export default function InspectPage() {
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{(buildingMeasurements?.grossWallArea || wallArea).toLocaleString()}</span>
                 <span className="hover-measurement__label">Gross Wall Area (sq ft)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{openingsArea.toLocaleString()}</span>
                 <span className="hover-measurement__label">Openings ({buildingMeasurements?.openingsPercent || 18}%)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{netWallArea.toLocaleString()}</span>
                 <span className="hover-measurement__label">Net Siding (sq ft)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{analysis.sidingMaterial}</span>
@@ -739,14 +751,17 @@ export default function InspectPage() {
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{roofArea.toLocaleString()}</span>
                 <span className="hover-measurement__label">Total Roof Area (sq ft)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{roofSquares}</span>
                 <span className="hover-measurement__label">Squares</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{facets}</span>
                 <span className="hover-measurement__label">Facets</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{analysis.roofType}</span>
@@ -758,7 +773,7 @@ export default function InspectPage() {
             <h4 className="hover-table-title">Roof Components</h4>
             <table className="hover-table">
               <thead>
-                <tr><th>Component</th><th>Count</th><th>Est. Length (ft)</th></tr>
+                <tr><th>Component</th><th>Count</th><th>Length (ft) · {AI_ESTIMATE_LABEL}</th></tr>
               </thead>
               <tbody>
                 <tr><td>Ridges / Hips</td><td>{ridgeCount || '—'}</td><td>{ridgeLen || '—'}</td></tr>
@@ -774,6 +789,7 @@ export default function InspectPage() {
             <div className="hover-pitch-display">
               <span className="hover-pitch-value">{quote?.pitchOver12 || '—'}/12</span>
               <span className="hover-pitch-label">{quote?.pitchCategory || ''} — {quote?.avgPitchDegrees?.toFixed(1) || '—'}°</span>
+              <AiEstimateLabel />
             </div>
 
             {/* Features */}
@@ -896,7 +912,7 @@ export default function InspectPage() {
                 </div>
               )}
               <div className="hover-quote-total">
-                <span>Total Estimated</span>
+                <span>Total Estimated <span className="ai-estimate-label" style={{ display: 'inline' }}>{AI_ESTIMATE_LABEL}</span></span>
                 <strong>{formatPrice(adjLow + sidingLow)} – {formatPrice(adjHigh + sidingHigh)}</strong>
               </div>
             </div>

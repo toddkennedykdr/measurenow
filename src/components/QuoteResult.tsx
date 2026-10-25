@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { FullQuoteData } from '../types';
+import { AiEstimateLabel, MeasureWarnings } from './MeasureHonesty';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
 
 interface Props {
   data: FullQuoteData;
@@ -68,20 +70,22 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         <div className="quote-result__price">
           {formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}
         </div>
-        <p className="quote-result__price-label">Estimated roof replacement cost</p>
+        <p className="quote-result__price-label">Estimated roof replacement cost · {AI_ESTIMATE_LABEL}</p>
+
+        <MeasureWarnings warnings={roofData.warnings} />
 
         <div className="quote-stats">
           <div className="quote-stat">
             <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
-            <span className="quote-stat__label">Sq Ft</span>
+            <span className="quote-stat__label">Sq Ft<AiEstimateLabel /></span>
           </div>
           <div className="quote-stat">
             <span className="quote-stat__value">{quote.roofSquares}</span>
-            <span className="quote-stat__label">Squares</span>
+            <span className="quote-stat__label">Squares<AiEstimateLabel /></span>
           </div>
           <div className="quote-stat">
             <span className="quote-stat__value">{quote.pitchOver12}/12</span>
-            <span className="quote-stat__label">{quote.pitchCategory} Pitch</span>
+            <span className="quote-stat__label">{quote.pitchCategory} Pitch<AiEstimateLabel /></span>
           </div>
         </div>
 

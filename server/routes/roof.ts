@@ -5,6 +5,7 @@ import { rejectIfPublicDailyCap } from '../publicDailyCap';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote, type RoofQuote } from '../services/pricing';
+import { assessQuoteHonesty } from '../services/quoteHonesty';
 
 export const roofRouter = Router();
 
@@ -85,6 +86,17 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
     }
 
     const quote = calculateQuote(building);
+    // No county or parcel building size is stored on this request.
+    const honesty = assessQuoteHonesty({
+      measuredRoofSqFt: building.totalAreaSqFt,
+      imageryQuality: building.imageryQuality,
+      imageryDate: building.imageryDate,
+      segmentBoxes: building.segmentBoxes,
+      wholeRoofAreaSqFt: building.wholeRoofAreaSqFt,
+      wholeRoofGroundSqFt: building.wholeRoofGroundSqFt,
+      buildingGroundSqFt: building.buildingGroundSqFt,
+      parcelBuildingSqFt: null,
+    });
 
     return res.json({
       lat,
@@ -98,6 +110,8 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
         estimatedPerimeterFt: building.estimatedPerimeterFt,
         estimatedLength: building.estimatedLength,
         estimatedWidth: building.estimatedWidth,
+        imageryDateLabel: honesty.imageryDateLabel,
+        warnings: honesty.warnings,
       },
       quote,
     });
