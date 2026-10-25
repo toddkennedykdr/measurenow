@@ -66,7 +66,7 @@ describe('public copy', () => {
     }
     assert.deepEqual(hits, []);
     const form = readFileSync(path.join(root, 'src/components/QuoteResult.tsx'), 'utf8');
-    assert.match(form, /placeholder="919-977-4074"/);
+    assert.match(form, /placeholder="Mobile number"/);
   });
 
   it('keeps the inspection tool behind the login route', () => {

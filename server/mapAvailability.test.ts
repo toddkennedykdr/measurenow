@@ -187,7 +187,7 @@ describe('map service failures', { concurrency: false }, () => {
     ]);
   });
 
-  it('says the map service failed when Solar returns an error', async () => {
+  it('returns a map-service error when every Solar quality fails', async () => {
     upstream = () => statusBody(403);
     const res = await post('/api/roof/quote', { lat: 35.78, lng: -78.64 });
     assert.equal(res.status, 503);
@@ -196,15 +196,39 @@ describe('map service failures', { concurrency: false }, () => {
     assertHidden(res.text);
     assertHidden(res.log);
     assert.match(res.log, /\b403\b/);
+    assert.equal(calls.length, 2);
   });
 
-  it('does not report missing roof data when one Solar request fails', async () => {
+  it('treats HIGH 403 then MEDIUM 404 as no roof data', async () => {
     let n = 0;
-    upstream = () => statusBody(n++ === 0 ? 500 : 404);
+    upstream = () => (n++ === 0 ? statusBody(403) : new Response('', { status: 404 }));
     const res = await post('/api/roof/quote', { lat: 35.78, lng: -78.64 });
-    assert.equal(res.status, 503);
-    assert.deepEqual(JSON.parse(res.text), { error: MAP_SERVICE_ERROR });
-    assert.equal(res.text.includes(NO_ROOF_DATA), false);
+    assert.equal(res.status, 404);
+    assert.deepEqual(JSON.parse(res.text), { error: NO_ROOF_DATA });
+    assert.equal(res.text.includes('map service'), false);
+    assertHidden(res.log);
+    assert.match(res.log, /\b403\b/);
+    assert.equal(calls.length, 2);
+  });
+
+  it('treats HIGH 500 then MEDIUM 404 as no roof data', async () => {
+    let n = 0;
+    upstream = () => (n++ === 0 ? statusBody(500) : new Response('', { status: 404 }));
+    const res = await post('/api/roof/quote', { lat: 35.78, lng: -78.64 });
+    assert.equal(res.status, 404);
+    assert.deepEqual(JSON.parse(res.text), { error: NO_ROOF_DATA });
+    assert.equal(res.text.includes('map service'), false);
+    assert.equal(calls.length, 2);
+  });
+
+  it('uses MEDIUM Solar data when HIGH quality is not found', async () => {
+    let n = 0;
+    upstream = () => (n++ === 0 ? new Response('', { status: 404 }) : solarBuilding());
+    const res = await post('/api/roof/quote', { lat: 35.78, lng: -78.64 });
+    assert.equal(res.status, 200);
+    const body = JSON.parse(res.text) as { quote: { lowEstimate: number } };
+    assert.equal(typeof body.quote.lowEstimate, 'number');
+    assertHidden(res.text);
     assert.equal(calls.length, 2);
   });
 
