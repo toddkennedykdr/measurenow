@@ -46,7 +46,7 @@ function loadGoogleMaps(apiKey: string): Promise<void> {
 }
 
 export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props) {
-  const { companyWebsite, setCompanyWebsite, extras } = usePublicFormGuard();
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
   const mapRef = useRef<HTMLDivElement>(null);
   const markerRef = useRef<any>(null);
   const [pinDragged, setPinDragged] = useState(false);
@@ -145,7 +145,7 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
       )}
 
       {error && <div className="error-msg">{error}</div>}
-      <HoneypotField id="company-website-confirm" value={companyWebsite} onChange={setCompanyWebsite} />
+      <HoneypotField id="contact-pref-confirm" value={contactPref} onChange={setContactPref} />
 
       <div className="confirm-buttons">
         {!pinDragged ? (

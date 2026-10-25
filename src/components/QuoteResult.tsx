@@ -14,7 +14,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { companyWebsite, setCompanyWebsite, extras } = usePublicFormGuard();
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const { quote, roofData, address } = data;
 
@@ -104,7 +104,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
       {error && <div className="error-msg">{error}</div>}
 
       <form onSubmit={handleSubmit}>
-        <HoneypotField id="company-website-lead" value={companyWebsite} onChange={setCompanyWebsite} />
+        <HoneypotField id="contact-pref-lead" value={contactPref} onChange={setContactPref} />
         <div className="form-group">
           <label htmlFor="name">Full Name</label>
           <input

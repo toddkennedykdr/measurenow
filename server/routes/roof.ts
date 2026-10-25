@@ -45,7 +45,9 @@ const quoteSchema = z.object({
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
   try {
     // Per-IP limiting stays on roofRateLimit (req.ip, one trusted proxy hop).
-    if (rejectIfSpam(req.body, res)) return;
+    // Staff and a roof API key already skip the public daily cap. They also
+    // skip the public honeypot and timer.
+    if (!skipsPublicDailyCap(req) && rejectIfSpam(req.body, res)) return;
     const parsed = addressSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -77,7 +79,7 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
 // Step 2: Get quote using confirmed lat/lng
 roofRouter.post('/quote', async (req: Request, res: Response) => {
   try {
-    if (rejectIfSpam(req.body, res)) return;
+    if (!skipsPublicDailyCap(req) && rejectIfSpam(req.body, res)) return;
     const parsed = quoteSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid coordinates.' });

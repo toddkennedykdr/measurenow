@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import express from 'express';
 import session from 'express-session';
 import { JN_API_KEY_DUMMY } from '../test/allowed-literals';
+import { resetWebsiteLeadStoreForTests, setWebsiteLeadStoreForTests } from './db/websiteLeads';
 import { leadRouter } from './routes/lead';
 
 const saved = {
@@ -52,6 +53,14 @@ before(async () => {
   delete process.env.JN_API_KEY;
   delete process.env.JOBNIMBUS_API_KEY;
   process.env.ROOF_API_KEY = JN_API_KEY_DUMMY;
+  setWebsiteLeadStoreForTests({
+    async insert() {
+      return { id: 1 };
+    },
+    async list() {
+      return [];
+    },
+  });
   installFetch();
   server = app().listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
@@ -69,6 +78,7 @@ after(async () => {
   else process.env.JOBNIMBUS_API_KEY = saved.alias;
   if (saved.roof === undefined) delete process.env.ROOF_API_KEY;
   else process.env.ROOF_API_KEY = saved.roof;
+  resetWebsiteLeadStoreForTests();
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });

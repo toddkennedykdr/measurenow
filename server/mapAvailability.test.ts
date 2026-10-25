@@ -5,6 +5,7 @@ import express from 'express';
 import { JN_API_KEY_DUMMY } from '../test/allowed-literals';
 import { resetPublicDailyCapForTests } from './publicDailyCap';
 import { roofRouter } from './routes/roof';
+import { FORM_STARTED_AT_FIELD, HONEYPOT_FIELD } from './spamGuard';
 import { MAP_SERVICE_ERROR } from './services/mapService';
 
 const NO_ROOF_DATA =
@@ -63,7 +64,15 @@ async function post(path: string, body: unknown) {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(
+        body && typeof body === 'object' && !Array.isArray(body)
+          ? {
+            [HONEYPOT_FIELD]: '',
+            [FORM_STARTED_AT_FIELD]: Date.now() - 60_000,
+            ...(body as Record<string, unknown>),
+          }
+          : body,
+      ),
     });
     const text = await res.text();
     if (calls.length > 0) assertKeySent();

@@ -174,7 +174,7 @@ export default function InspectPage() {
   const [showJN, setShowJN] = useState(false);
   const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const { user } = useAuth();
-  const { companyWebsite, setCompanyWebsite, extras } = usePublicFormGuard();
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -408,7 +408,7 @@ export default function InspectPage() {
               disabled={loading}
             />
           </div>
-          <HoneypotField id="company-website-inspect" value={companyWebsite} onChange={setCompanyWebsite} />
+          <HoneypotField id="contact-pref-inspect" value={contactPref} onChange={setContactPref} />
           <button className="btn btn--primary" onClick={handleGeocode} disabled={loading}>
             {loading && <span className="spinner" />}
             {loading ? 'Finding...' : 'Find Property'}
@@ -425,7 +425,7 @@ export default function InspectPage() {
           {pinDragged && (
             <p className="inspect-pin-note">📌 Pin moved — using updated location</p>
           )}
-          <HoneypotField id="company-website-inspect-confirm" value={companyWebsite} onChange={setCompanyWebsite} />
+          <HoneypotField id="contact-pref-inspect-confirm" value={contactPref} onChange={setContactPref} />
           <div className="confirm-buttons">
             <button className="btn btn--primary" onClick={handleConfirmLocation} disabled={loading}>
               {loading && <span className="spinner" />}

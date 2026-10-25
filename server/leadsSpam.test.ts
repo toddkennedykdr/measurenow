@@ -7,8 +7,12 @@ import path from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import session from 'express-session';
+import type { Request, Response } from 'express';
 import { getTableColumns } from 'drizzle-orm';
 import { JN_API_KEY_DUMMY } from '../test/allowed-literals';
+import { clientIp, LEAD_RATE_LIMIT_MAX, LEAD_RATE_LIMIT_MESSAGE, leadCaptureRateLimit, rateLimitAddressKey } from './leadRateLimit';
+import { visitFormStartedAt } from '../src/publicFormGuard';
 import { websiteLeads } from './db/schema';
 import {
   resetWebsiteLeadStoreForTests,
@@ -17,7 +21,6 @@ import {
   type WebsiteLeadStore,
 } from './db/websiteLeads';
 import { applyWebsiteLeadSchema, WEBSITE_LEAD_DDL } from './db/websiteLeadSchema';
-import { LEAD_RATE_LIMIT_MAX, LEAD_RATE_LIMIT_MESSAGE } from './leadRateLimit';
 import {
   resetPublicDailyCapForTests,
   ROOF_PUBLIC_DAILY_CAP_ENV,
@@ -52,6 +55,7 @@ type Call = { host: string; path: string; authorization: string | null; body: st
 const calls: Call[] = [];
 const timeline: string[] = [];
 let restoreFetch = () => {};
+let failDelivery = false;
 const consoleFns = {
   log: console.log,
   warn: console.warn,
@@ -132,6 +136,9 @@ function installFetchMock() {
       body,
     });
     timeline.push(url.hostname);
+    if (failDelivery && (url.hostname === 'app.jobnimbus.com' || url.hostname === 'api.resend.com')) {
+      return new Response('upstream-secret', { status: 502 });
+    }
     if (url.hostname === 'app.jobnimbus.com') return Response.json({ id: 'test-contact' });
     if (url.hostname === 'api.resend.com') return Response.json({ id: 'test-email' });
     if (url.hostname === 'maps.googleapis.com' && url.pathname === '/maps/api/geocode/json') {
@@ -170,6 +177,53 @@ async function listen(app: express.Express): Promise<{ server: http.Server; base
   return { server: started, base: `http://127.0.0.1:${address.port}` };
 }
 
+async function hitLeadLimit(socketIp: string, forwarded?: string): Promise<number> {
+  const req = {
+    headers: forwarded ? { 'x-forwarded-for': forwarded } : {},
+    socket: { remoteAddress: socketIp },
+    app: { get: () => 1 },
+    ip: socketIp,
+    method: 'POST',
+    url: '/capture',
+    path: '/capture',
+  } as unknown as Request;
+  let statusCode = 200;
+  let finish = () => {};
+  const res = {
+    statusCode: 200,
+    headersSent: false,
+    writableEnded: false,
+    status(code: number) {
+      statusCode = code;
+      this.statusCode = code;
+      return this;
+    },
+    send() {
+      this.headersSent = true;
+      this.writableEnded = true;
+      finish();
+      return this;
+    },
+    setHeader() {
+      return this;
+    },
+    getHeader() {
+      return undefined;
+    },
+    on() {
+      return this;
+    },
+  } as unknown as Response;
+  await new Promise<void>((resolve, reject) => {
+    finish = resolve;
+    Promise.resolve(leadCaptureRateLimit(req, res, (err?: unknown) => {
+      if (err) reject(err);
+      else resolve();
+    })).catch(reject);
+  });
+  return statusCode;
+}
+
 async function postLead(body: unknown, ip = nextIp()) {
   const res = await fetch(`${base}/api/lead/capture`, {
     method: 'POST',
@@ -191,6 +245,15 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     const app = express();
     app.set('trust proxy', 1);
     app.use(express.json());
+    app.use(session({
+      secret: JN_API_KEY_DUMMY,
+      resave: false,
+      saveUninitialized: false,
+    }));
+    app.post('/login', (req, res) => {
+      (req.session as { userId?: number }).userId = 7;
+      res.json({ ok: true });
+    });
     app.use('/api/lead', leadRouter);
     const started = await listen(app);
     server = started.server;
@@ -200,6 +263,7 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
   beforeEach(() => {
     calls.length = 0;
     timeline.length = 0;
+    failDelivery = false;
     delete process.env.JN_API_KEY;
     delete process.env.RESEND_API_KEY;
     delete process.env.JOBNIMBUS_API_KEY;
@@ -256,6 +320,8 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     const client = readFileSync(path.join(here, '../src/publicFormGuard.ts'), 'utf8');
     assert.match(client, new RegExp(`HONEYPOT_FIELD = '${HONEYPOT_FIELD}'`));
     assert.match(client, new RegExp(`FORM_STARTED_AT_FIELD = '${FORM_STARTED_AT_FIELD}'`));
+    const started = visitFormStartedAt(1_700_000_000_000);
+    assert.equal(visitFormStartedAt(1_800_000_000_000), started);
     for (const rel of [
       '../src/components/AddressForm.tsx',
       '../src/components/QuoteResult.tsx',
@@ -271,6 +337,18 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     const css = readFileSync(path.join(here, '../src/styles.css'), 'utf8');
     assert.match(css, /\.hp-field\s*\{[^}]*left:\s*-10000px/s);
     assert.equal(/\.hp-field\s*\{[^}]*display\s*:\s*none/s.test(css), false);
+    assert.equal(/useRef\(Date\.now\(\)\)/.test(client), false);
+    assert.match(client, /visitStartedAt/);
+    const honeypot = readFileSync(path.join(here, '../src/components/HoneypotField.tsx'), 'utf8');
+    assert.match(honeypot, /autoComplete="off"/);
+    assert.match(honeypot, /tabIndex=\{-1\}/);
+    assert.match(honeypot, /aria-hidden="true"/);
+    assert.equal(honeypot.includes('Company website'), false);
+    assert.equal(honeypot.includes('companyWebsite'), false);
+    const leadSrc = readFileSync(path.join(here, 'routes/lead.ts'), 'utf8');
+    assert.equal(/console\.(log|error|warn)/.test(leadSrc), true);
+    assert.equal(leadSrc.includes('err.message'), false);
+    assert.equal(/console\.(log|error|warn)\(/.test(leadSrc) && leadSrc.includes('lead.name') && /console\.(log|error|warn)\([^)]*lead\.name/.test(leadSrc), false);
     for (const rel of ['spamGuard.ts', 'leadRateLimit.ts']) {
       const src = readFileSync(path.join(here, rel), 'utf8');
       assert.equal(/no pressure/i.test(src), false);
@@ -285,8 +363,10 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     assert.match(indexSrc, /app\.set\('trust proxy', 1\)/);
     assert.equal(/trust proxy',\s*true/.test(indexSrc), false);
     const limiter = readFileSync(path.join(here, 'leadRateLimit.ts'), 'utf8');
-    assert.match(limiter, /return req\.ip \|\| 'unknown'/);
     assert.match(limiter, /keyGenerator: \(req\) => clientIp\(req\)/);
+    assert.match(limiter, /::\/64/);
+    assert.match(limiter, /isExpectedProxyPeer/);
+    assert.equal(/return req\.ip \|\| 'unknown'/.test(limiter), false);
     const roof = readFileSync(path.join(here, 'middleware/roofAccess.ts'), 'utf8');
     const roofKey = roof.slice(roof.indexOf('keyGenerator'));
     assert.match(roofKey, /return req\.ip \|\| 'unknown'/);
@@ -320,6 +400,27 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
         trusted.server.close((err) => (err ? reject(err) : resolve()));
       });
     }
+
+    const direct = {
+      headers: { 'x-forwarded-for': '198.51.100.9, 203.0.113.50' },
+      socket: { remoteAddress: '203.0.113.77' },
+    } as unknown as Request;
+    assert.equal(clientIp(direct), '203.0.113.77');
+    const loopback = {
+      headers: { 'x-forwarded-for': '2001:db8:9:9::5' },
+      socket: { remoteAddress: '::ffff:127.0.0.1' },
+    } as unknown as Request;
+    assert.equal(clientIp(loopback), '2001:db8:9:9::/64');
+    const proxy = {
+      headers: { 'x-forwarded-for': '198.51.100.9, 203.0.113.50' },
+      socket: { remoteAddress: '10.0.0.8' },
+    } as unknown as Request;
+    assert.equal(clientIp(proxy), '203.0.113.50');
+    assert.equal(rateLimitAddressKey('203.0.113.10'), '203.0.113.10');
+    assert.equal(rateLimitAddressKey('2001:db8:1:2::1'), '2001:db8:1:2::/64');
+    assert.equal(rateLimitAddressKey('2001:db8:1:2:ffff::9'), rateLimitAddressKey('2001:0db8:0001:0002::1'));
+    assert.notEqual(rateLimitAddressKey('2001:db8:1:2::1'), rateLimitAddressKey('2001:db8:1:3::1'));
+    assert.equal(rateLimitAddressKey('::ffff:203.0.113.10'), '203.0.113.10');
   });
 
   test('capture rejects honeypot, fast, stale, and invalid leads before delivery', async () => {
@@ -359,6 +460,14 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     assert.equal(lowHigh.status, 400);
     assert.equal(lowHigh.json.error, QUOTE_DETAIL);
 
+    const shortPhone = await postLead(leadBody({ phone: '1234567' }));
+    assert.equal(shortPhone.status, 400);
+    assert.equal(shortPhone.json.error, 'Please enter a valid phone number.');
+
+    const longPhone = await postLead(leadBody({ phone: '1234567890123456' }));
+    assert.equal(longPhone.status, 400);
+    assert.equal(longPhone.json.error, 'Please enter a shorter phone number.');
+
     assert.deepEqual(timeline, []);
     assert.deepEqual(calls, []);
   });
@@ -394,33 +503,155 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     assert.equal(email.body.includes('spam.example'), false);
   });
 
-  test('a failed save does not call JobNimbus', async () => {
+  test('a failed save still sends the same email and JobNimbus request', async () => {
     process.env.JN_API_KEY = JN_API_KEY_DUMMY;
     process.env.RESEND_API_KEY = JN_API_KEY_DUMMY;
+    const lines: string[] = [];
+    const prevLog = console.log;
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map((arg) => String(arg)).join(' '));
+    };
+    try {
+      const saved = await postLead(leadBody());
+      assert.equal(saved.status, 200);
+      const savedEmail = calls.find((call) => call.host === 'api.resend.com');
+      const savedJn = calls.find((call) => call.host === 'app.jobnimbus.com');
+      assert.ok(savedEmail);
+      assert.ok(savedJn);
+      calls.length = 0;
+      timeline.length = 0;
+      lines.length = 0;
+      setWebsiteLeadStoreForTests({
+        async insert() {
+          timeline.push('save');
+          throw new Error('db down');
+        },
+        async list() {
+          return [];
+        },
+      });
+      const failed = await postLead(leadBody());
+      assert.equal(failed.status, 200);
+      assert.equal(failed.json.success, true);
+      assert.deepEqual(timeline, ['save', 'api.resend.com', 'app.jobnimbus.com']);
+      const failedEmail = calls.find((call) => call.host === 'api.resend.com');
+      const failedJn = calls.find((call) => call.host === 'app.jobnimbus.com');
+      assert.ok(failedEmail);
+      assert.ok(failedJn);
+      assert.equal(calls.filter((call) => call.host === 'api.resend.com').length, 1);
+      assert.equal(calls.filter((call) => call.host === 'app.jobnimbus.com').length, 1);
+      assert.deepEqual(failedEmail, savedEmail);
+      assert.deepEqual(failedJn, savedJn);
+      const subject = (JSON.parse(failedEmail.body) as { subject: string }).subject;
+      assert.equal(subject, 'New MeasureNow Lead: Pat Example');
+      assert.equal(subject.includes('DB SAVE FAILED'), false);
+      const log = lines.join('\n');
+      assert.match(log, /lead delivery db=fail email=ok jn=ok/);
+      assert.equal(log.includes('Pat Example'), false);
+      assert.equal(log.includes('pat@example.com'), false);
+      assert.equal(log.includes('123 Main St'), false);
+      assert.equal(log.includes('919-555-0100'), false);
+    } finally {
+      console.log = prevLog;
+    }
+  });
+
+  test('lead capture returns the save error only when save, email, and JobNimbus all fail', async () => {
+    process.env.JN_API_KEY = JN_API_KEY_DUMMY;
+    process.env.RESEND_API_KEY = JN_API_KEY_DUMMY;
+    failDelivery = true;
+    const lines: string[] = [];
+    const prevLog = console.log;
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map((arg) => String(arg)).join(' '));
+    };
     setWebsiteLeadStoreForTests({
       async insert() {
         timeline.push('save');
-        throw new Error('db down');
+        const err = new Error('unique');
+        (err as { code?: string }).code = '23505';
+        throw err;
       },
       async list() {
         return [];
       },
     });
-    const failed = await postLead(leadBody());
-    assert.equal(failed.status, 500);
-    assert.equal(failed.json.error, LEAD_SAVE_ERROR);
-    assert.deepEqual(timeline, ['save']);
-    assert.deepEqual(calls, []);
+    try {
+      const failed = await postLead(leadBody());
+      assert.equal(failed.status, 500);
+      assert.equal(failed.json.error, LEAD_SAVE_ERROR);
+      assert.deepEqual(timeline.filter((event) => event === 'save'), ['save']);
+      assert.equal(calls.filter((call) => call.host === 'api.resend.com').length, 1);
+      assert.equal(calls.filter((call) => call.host === 'app.jobnimbus.com').length, 1);
+      const log = lines.join('\n');
+      assert.match(log, /lead delivery db=fail email=fail jn=fail/);
+      assert.equal(log.includes('pat@example.com'), false);
+      assert.equal(log.includes('upstream-secret'), false);
+      assert.equal(log.includes('unique'), false);
+      assert.equal(log.includes('23505'), false);
+    } finally {
+      console.log = prevLog;
+    }
   });
 
-  test('list reads the stored rows, newest first', async () => {
+  test('a transient insert error is retried once and then delivered', async () => {
+    process.env.JN_API_KEY = JN_API_KEY_DUMMY;
+    process.env.RESEND_API_KEY = JN_API_KEY_DUMMY;
+    let attempts = 0;
+    setWebsiteLeadStoreForTests({
+      async insert() {
+        timeline.push('save');
+        attempts += 1;
+        if (attempts === 1) {
+          const err = new Error('connection terminated');
+          (err as { code?: string }).code = '08006';
+          throw err;
+        }
+        return { id: 1 };
+      },
+      async list() {
+        return [];
+      },
+    });
+    const saved = await postLead(leadBody());
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.success, true);
+    assert.equal(attempts, 2);
+    assert.equal(calls.filter((call) => call.host === 'api.resend.com').length, 1);
+    assert.equal(calls.filter((call) => call.host === 'app.jobnimbus.com').length, 1);
+  });
+
+  test('list requires a session and ignores a roof API key', async () => {
     const mem = memoryStore();
     setWebsiteLeadStoreForTests(mem.store);
     const first = await postLead(leadBody({ name: 'Pat Example' }));
     const second = await postLead(leadBody({ name: 'Sam Example', email: 'sam@example.com' }));
     assert.equal(first.status, 200);
     assert.equal(second.status, 200);
-    const res = await fetch(`${base}/api/lead/list`);
+
+    const anon = await fetch(`${base}/api/lead/list`);
+    assert.equal(anon.status, 401);
+    assert.deepEqual(await anon.json(), { error: 'Not authenticated' });
+
+    const previousKey = process.env.ROOF_API_KEY;
+    process.env.ROOF_API_KEY = JN_API_KEY_DUMMY;
+    try {
+      const keyed = await fetch(`${base}/api/lead/list`, {
+        headers: { 'x-api-key': JN_API_KEY_DUMMY },
+      });
+      assert.equal(keyed.status, 401);
+      assert.deepEqual(await keyed.json(), { error: 'Not authenticated' });
+    } finally {
+      if (previousKey === undefined) delete process.env.ROOF_API_KEY;
+      else process.env.ROOF_API_KEY = previousKey;
+    }
+
+    const login = await fetch(`${base}/login`, { method: 'POST' });
+    const setCookie = login.headers.getSetCookie?.()[0] ?? login.headers.get('set-cookie');
+    assert.ok(setCookie);
+    const res = await fetch(`${base}/api/lead/list`, {
+      headers: { cookie: setCookie.split(';')[0] },
+    });
     const body = await res.json() as { count: number; leads: Array<{ name: string; id: number }> };
     assert.equal(res.status, 200);
     assert.equal(body.count, 2);
@@ -520,6 +751,109 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
       resetPublicDailyCapForTests();
       if (savedEnv.cap === undefined) delete process.env[ROOF_PUBLIC_DAILY_CAP_ENV];
       else process.env[ROOF_PUBLIC_DAILY_CAP_ENV] = savedEnv.cap;
+      await new Promise<void>((resolve, reject) => {
+        quoteServer.server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
+
+  test('honeypot and invalid leads do not use the lead rate limit', async () => {
+    const ip = '203.0.113.180';
+    for (let n = 0; n < 8; n++) {
+      const honeypot = await postLead(leadBody({ [HONEYPOT_FIELD]: `http://spam${n}.example` }), ip);
+      assert.equal(honeypot.status, 400);
+      const invalid = await postLead(leadBody({ email: 'not-an-email' }), ip);
+      assert.equal(invalid.status, 400);
+    }
+    for (let n = 0; n < LEAD_RATE_LIMIT_MAX; n++) {
+      const ok = await postLead(leadBody({ email: `counted${n}@example.com` }), ip);
+      assert.equal(ok.status, 200, `counted ${n}`);
+    }
+    const blocked = await postLead(leadBody({ email: 'over-limit@example.com' }), ip);
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.json.error, LEAD_RATE_LIMIT_MESSAGE);
+  });
+
+  test('a formatted phone with 10 to 15 digits is stored', async () => {
+    const ok = await postLead(leadBody({ phone: '+1 (919) 977-4074' }));
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.success, true);
+  });
+
+  test('a direct public socket ignores X-Forwarded-For and groups IPv6 by /64', async () => {
+    const socket = '198.51.100.250';
+    for (let n = 0; n < LEAD_RATE_LIMIT_MAX; n++) {
+      assert.equal(await hitLeadLimit(socket, `203.0.113.${n}`), 200, `direct ${n}`);
+    }
+    assert.equal(await hitLeadLimit(socket, '203.0.113.99'), 429);
+    assert.equal(await hitLeadLimit('198.51.100.251', '203.0.113.99'), 200);
+
+    const inside = '2001:db8:4:4:aaaa::1';
+    for (let n = 0; n < LEAD_RATE_LIMIT_MAX; n++) {
+      assert.equal(await hitLeadLimit(inside, `198.51.100.${n}`), 200, `v6 ${n}`);
+    }
+    assert.equal(await hitLeadLimit('2001:db8:4:4:bbbb::2', '203.0.113.1'), 429);
+    assert.equal(await hitLeadLimit('2001:db8:4:5::1'), 200);
+  });
+
+  test('staff and a roof API key skip the public honeypot and timer', async () => {
+    const previousRoof = process.env.ROOF_API_KEY;
+    const previousCap = process.env[ROOF_PUBLIC_DAILY_CAP_ENV];
+    process.env.ROOF_API_KEY = JN_API_KEY_DUMMY;
+    process.env[ROOF_PUBLIC_DAILY_CAP_ENV] = '0';
+    process.env.GOOGLE_SOLAR_API_KEY = JN_API_KEY_DUMMY;
+    resetPublicDailyCapForTests();
+    const app = express();
+    app.use(express.json());
+    app.use(session({
+      secret: JN_API_KEY_DUMMY,
+      resave: false,
+      saveUninitialized: false,
+    }));
+    app.post('/login', (req, res) => {
+      (req.session as { userId?: number }).userId = 7;
+      res.json({ ok: true });
+    });
+    app.use('/api/roof', roofRouter);
+    const quoteServer = await listen(app);
+    const post = async (pathName: string, body: unknown, headers: Record<string, string> = {}) => {
+      const res = await fetch(`${quoteServer.base}${pathName}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      return {
+        status: res.status,
+        json: text ? JSON.parse(text) as { error?: string; address?: string; quote?: unknown } : {},
+      };
+    };
+    try {
+      const anon = await post('/api/roof/geocode', { address: '123 Main St, Raleigh, NC' });
+      assert.equal(anon.status, 400);
+      assert.equal(anon.json.error, SPAM_RELOAD_MESSAGE);
+
+      const keyed = await post('/api/roof/geocode', {
+        address: '123 Main St, Raleigh, NC',
+        [HONEYPOT_FIELD]: 'http://spam.example',
+      }, { 'x-api-key': JN_API_KEY_DUMMY });
+      assert.equal(keyed.status, 200);
+      assert.equal(keyed.json.address, '123 Main St, Raleigh, NC 27601');
+
+      const login = await fetch(`${quoteServer.base}/login`, { method: 'POST' });
+      const setCookie = login.headers.getSetCookie?.()[0] ?? login.headers.get('set-cookie');
+      assert.ok(setCookie);
+      const staff = await post('/api/roof/quote', { lat: 35.78, lng: -78.64 }, {
+        cookie: setCookie.split(';')[0],
+      });
+      assert.equal(staff.status, 200);
+      assert.equal(typeof staff.json.quote, 'object');
+    } finally {
+      resetPublicDailyCapForTests();
+      if (previousRoof === undefined) delete process.env.ROOF_API_KEY;
+      else process.env.ROOF_API_KEY = previousRoof;
+      if (previousCap === undefined) delete process.env[ROOF_PUBLIC_DAILY_CAP_ENV];
+      else process.env[ROOF_PUBLIC_DAILY_CAP_ENV] = previousCap;
       await new Promise<void>((resolve, reject) => {
         quoteServer.server.close((err) => (err ? reject(err) : resolve()));
       });
