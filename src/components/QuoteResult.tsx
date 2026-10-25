@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react';
+import { HoneypotField } from './HoneypotField';
+import { usePublicFormGuard } from '../publicFormGuard';
 import type { FullQuoteData } from '../types';
 import { ShareQuoteButton } from './ShareQuoteButton';
 import { buildSharePayload } from '../shareQuote';
@@ -14,6 +16,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const { quote, roofData, address } = data;
 
@@ -45,6 +48,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           roofSquares: quote.roofSquares,
           avgPitchDegrees: quote.avgPitchDegrees,
           pitchOver12: quote.pitchOver12,
+          ...extras,
         }),
       });
 
@@ -114,6 +118,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
       {error && <div className="error-msg">{error}</div>}
 
       <form onSubmit={handleSubmit}>
+        <HoneypotField id="contact-pref-lead" value={contactPref} onChange={setContactPref} />
         <div className="form-group">
           <label htmlFor="name">Full Name</label>
           <input
