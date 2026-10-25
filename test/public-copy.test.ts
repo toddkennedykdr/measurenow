@@ -50,7 +50,7 @@ describe('public copy', () => {
       onStartOver: () => {},
     }));
     assert.match(html, /href="tel:\+19199774074"/);
-    assert.match(html, /Call Us Now: 919-977-4074/);
+    assert.match(html, /Call K&amp;D Roofing: 919-977-4074/);
     assert.match(html, /K&amp;D Roofing/);
     assert.equal(html.includes('555'), false);
     assert.equal(html.toLowerCase().includes('pressure'), false);
