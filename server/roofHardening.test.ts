@@ -18,6 +18,7 @@ import {
   takePublicDailySlot,
 } from './publicDailyCap';
 import { roofRouter } from './routes/roof';
+import { MapServiceError } from './services/mapService';
 import { getBuildingInsights } from './services/solar';
 
 const BUSY = 'Our online estimate is busy right now. Please call K&D Roofing at 919-977-4074.';
@@ -126,7 +127,10 @@ describe('roof hardening', { concurrency: false }, () => {
       lines.push(args.map((arg) => String(arg)).join(' '));
     };
     try {
-      assert.equal(await getBuildingInsights(35.78, -78.64), null);
+      await assert.rejects(
+        () => getBuildingInsights(35.78, -78.64),
+        (err: unknown) => err instanceof MapServiceError,
+      );
     } finally {
       console.error = prev;
       globalThis.fetch = prevFetch;

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { roofApiKeyMatches } from '../middleware/roofAccess';
 import { rejectIfPublicDailyCap } from '../publicDailyCap';
 import { geocodeAddress } from '../services/geocode';
+import { MAP_SERVICE_ERROR, MapServiceError } from '../services/mapService';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote, type RoofQuote } from '../services/pricing';
 import { rejectIfSpam } from '../spamGuard';
@@ -44,7 +45,9 @@ const quoteSchema = z.object({
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
   try {
     // Per-IP limiting stays on roofRateLimit (req.ip, one trusted proxy hop).
-    if (rejectIfSpam(req.body, res)) return;
+    // Staff and a roof API key already skip the public daily cap. They also
+    // skip the public honeypot and timer.
+    if (!skipsPublicDailyCap(req) && rejectIfSpam(req.body, res)) return;
     const parsed = addressSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -63,8 +66,12 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
       lat: location.lat,
       lng: location.lng,
     });
-  } catch (err: any) {
-    console.error('Geocode error:', err.message || err);
+  } catch (err: unknown) {
+    if (err instanceof MapServiceError) {
+      console.error('Geocode error: map service unavailable');
+      return res.status(503).json({ error: MAP_SERVICE_ERROR });
+    }
+    console.error('Geocode error:', err instanceof Error ? err.name : 'Error');
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
@@ -72,7 +79,7 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
 // Step 2: Get quote using confirmed lat/lng
 roofRouter.post('/quote', async (req: Request, res: Response) => {
   try {
-    if (rejectIfSpam(req.body, res)) return;
+    if (!skipsPublicDailyCap(req) && rejectIfSpam(req.body, res)) return;
     const parsed = quoteSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid coordinates.' });
@@ -105,8 +112,12 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
       },
       quote,
     });
-  } catch (err: any) {
-    console.error('Quote error:', err.message || err);
+  } catch (err: unknown) {
+    if (err instanceof MapServiceError) {
+      console.error('Quote error: map service unavailable');
+      return res.status(503).json({ error: MAP_SERVICE_ERROR });
+    }
+    console.error('Quote error:', err instanceof Error ? err.name : 'Error');
     return res.status(500).json({
       error: 'Something went wrong generating your quote. Please try again or call us directly.',
     });

@@ -1,27 +1,37 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
 /** Keep these names in sync with server/spamGuard.ts. */
-export const HONEYPOT_FIELD = 'companyWebsite';
+export const HONEYPOT_FIELD = 'contactPref_x';
 export const FORM_STARTED_AT_FIELD = 'formStartedAt';
 
 export type PublicFormExtras = {
-  companyWebsite: string;
+  contactPref_x: string;
   formStartedAt: number;
 };
 
-/** Clock starts when the form mounts. The server rejects an instant submit. */
+/**
+ * One clock per page load. Later steps reuse it, so a fast confirm or
+ * lead form does not look like a brand-new visit.
+ */
+let visitStartedAt: number | undefined;
+
+export function visitFormStartedAt(now = Date.now()): number {
+  if (visitStartedAt === undefined) visitStartedAt = now;
+  return visitStartedAt;
+}
+
 export function usePublicFormGuard(): {
-  companyWebsite: string;
-  setCompanyWebsite: (value: string) => void;
+  contactPref: string;
+  setContactPref: (value: string) => void;
   extras: PublicFormExtras;
 } {
-  const startedAt = useRef(Date.now()).current;
-  const [companyWebsite, setCompanyWebsite] = useState('');
+  const startedAt = visitFormStartedAt();
+  const [contactPref, setContactPref] = useState('');
   return {
-    companyWebsite,
-    setCompanyWebsite,
+    contactPref,
+    setContactPref,
     extras: {
-      companyWebsite,
+      contactPref_x: contactPref,
       formStartedAt: startedAt,
     },
   };

@@ -57,3 +57,11 @@ A single app that replaces both Hover (~$2,100/mo) and Roofle (TBD/mo) subscript
 ## Owner
 Todd Kennedy — K&D Roofing
 Built by: Stack (coding agent) under Jake Miller's direction
+
+## Lead rate limit
+
+`POST /api/lead/capture` allows 5 accepted submissions every 10 minutes. The key is the full IPv4 address, or the /64 network for an IPv6 address. Honeypot and validation failures are not counted.
+
+`X-Forwarded-For` is used only when the TCP peer is the one expected proxy hop: loopback (`127.0.0.0/8` or `::1`), link-local, unique-local IPv6, or a private IPv4 range (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`), including an IPv4-mapped form of those addresses. The key is then the last forwarded address, which is the address that hop appended. A public peer is limited by its socket address, so it cannot open another bucket by changing the header.
+
+The process must not be reachable from the public internet except through a proxy that connects from one of those ranges. `trust proxy` stays at 1 so other limits can still see the visitor behind that hop.

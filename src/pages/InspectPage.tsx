@@ -3,9 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
+import { ShareQuoteButton } from '../components/ShareQuoteButton';
 import { useAuth } from '../context/AuthContext';
 import { HoneypotField } from '../components/HoneypotField';
 import { usePublicFormGuard } from '../publicFormGuard';
+import { buildSharePayload } from '../shareQuote';
+import { conditionColor, severityColor } from '../statusColors';
 
 // Types
 interface PhotoSlot {
@@ -136,18 +139,6 @@ function formatPrice(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-function severityColor(s: string) {
-  if (s === 'major') return '#E2312B';
-  if (s === 'minor') return '#ca8a04';
-  return '#16a34a';
-}
-
-function conditionColor(c: string) {
-  if (c === 'poor') return '#E2312B';
-  if (c === 'fair') return '#ca8a04';
-  return '#16a34a';
-}
-
 export default function InspectPage() {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>('address');
@@ -174,10 +165,11 @@ export default function InspectPage() {
   const [showJN, setShowJN] = useState(false);
   const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const { user } = useAuth();
-  const { companyWebsite, setCompanyWebsite, extras } = usePublicFormGuard();
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
 
   // Auto-geocode if address param provided
   useEffect(() => {
@@ -186,6 +178,10 @@ export default function InspectPage() {
       setAddress(addr);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (step === 'address') addressRef.current?.focus();
+  }, [step]);
 
   // Geocode
   const handleGeocode = async () => {
@@ -398,7 +394,10 @@ export default function InspectPage() {
           <h2 className="card__title">Enter Property Address</h2>
           <p className="card__subtitle">Start your on-site inspection</p>
           <div className="form-group">
+            <label htmlFor="inspect-address">Property address</label>
             <input
+              id="inspect-address"
+              ref={addressRef}
               className="input"
               type="text"
               placeholder="123 Main St, Raleigh, NC"
@@ -406,9 +405,11 @@ export default function InspectPage() {
               onChange={e => setAddress(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleGeocode()}
               disabled={loading}
+              autoComplete="street-address"
+              autoFocus
             />
           </div>
-          <HoneypotField id="company-website-inspect" value={companyWebsite} onChange={setCompanyWebsite} />
+          <HoneypotField id="contact-pref-inspect" value={contactPref} onChange={setContactPref} />
           <button className="btn btn--primary" onClick={handleGeocode} disabled={loading}>
             {loading && <span className="spinner" />}
             {loading ? 'Finding...' : 'Find Property'}
@@ -425,7 +426,7 @@ export default function InspectPage() {
           {pinDragged && (
             <p className="inspect-pin-note">📌 Pin moved — using updated location</p>
           )}
-          <HoneypotField id="company-website-inspect-confirm" value={companyWebsite} onChange={setCompanyWebsite} />
+          <HoneypotField id="contact-pref-inspect-confirm" value={contactPref} onChange={setContactPref} />
           <div className="confirm-buttons">
             <button className="btn btn--primary" onClick={handleConfirmLocation} disabled={loading}>
               {loading && <span className="spinner" />}
@@ -604,6 +605,15 @@ export default function InspectPage() {
             <button className="btn btn--outline" onClick={() => window.print()}>
               🖨️ Print Report
             </button>
+            <ShareQuoteButton
+              payload={buildSharePayload({
+                address,
+                lowLabel: formatPrice(adjLow + sidingLow),
+                highLabel: formatPrice(adjHigh + sidingHigh),
+                detail: `${roofArea.toLocaleString()} sq ft · ${roofSquares} squares`,
+                pageUrl: savedReportId ? `${window.location.origin}/reports/${savedReportId}` : window.location.href,
+              })}
+            />
             {user && (
               <button className="btn btn--secondary" onClick={() => setShowJN(true)}>
                 📤 Send to JobNimbus
@@ -640,7 +650,7 @@ export default function InspectPage() {
               <h2 className="hover-section__title">Siding Summary</h2>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 {buildingMeasurements?.measurementSource === 'satellite' && (
-                  <span className="hover-section__badge" style={{ background: '#2563eb', fontSize: '10px', padding: '3px 8px' }}>
+                  <span className="hover-section__badge" style={{ background: 'var(--blue)', fontSize: '12px', padding: '6px 10px' }}>
                     🛰️ SATELLITE MEASURED
                   </span>
                 )}
@@ -829,8 +839,7 @@ export default function InspectPage() {
               <span className="hover-complexity__label">Complexity Rating</span>
               <div className="hover-complexity__bar">
                 {[1, 2, 3, 4, 5].map(n => (
-                  <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`}
-                    style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }} />
+                  <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`} />
                 ))}
               </div>
               <span className="hover-complexity__text">{complexityRating}/5 — {analysis.complexity.explanation}</span>

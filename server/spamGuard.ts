@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 
 /** Keep these names in sync with src/publicFormGuard.ts. */
-export const HONEYPOT_FIELD = 'companyWebsite';
+export const HONEYPOT_FIELD = 'contactPref_x';
 export const FORM_STARTED_AT_FIELD = 'formStartedAt';
 
 export const MIN_SUBMIT_MS = 2_000;

@@ -10,7 +10,7 @@ interface Props {
 export function HoneypotField({ id, value, onChange }: Props) {
   return (
     <div className="hp-field" aria-hidden="true">
-      <label htmlFor={id}>Company website</label>
+      <label htmlFor={id}>Preference</label>
       <input
         id={id}
         name={HONEYPOT_FIELD}
@@ -19,6 +19,7 @@ export function HoneypotField({ id, value, onChange }: Props) {
         onChange={(event) => onChange(event.target.value)}
         tabIndex={-1}
         autoComplete="off"
+        aria-hidden="true"
       />
     </div>
   );

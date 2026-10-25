@@ -11,7 +11,7 @@ export function AddressForm({ onGeocoded }: Props) {
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { companyWebsite, setCompanyWebsite, extras } = usePublicFormGuard();
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -53,7 +53,7 @@ export function AddressForm({ onGeocoded }: Props) {
       {error && <div className="error-msg">{error}</div>}
 
       <form onSubmit={handleSubmit}>
-        <HoneypotField id="company-website-address" value={companyWebsite} onChange={setCompanyWebsite} />
+        <HoneypotField id="contact-pref-address" value={contactPref} onChange={setContactPref} />
         <div className="form-group">
           <label htmlFor="address">Property Address</label>
           <input

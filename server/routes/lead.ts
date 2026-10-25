@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { websiteLeadStore } from '../db/websiteLeads';
 import { leadCaptureRateLimit } from '../leadRateLimit';
@@ -24,10 +24,23 @@ function optionalRange(max: number) {
     .optional();
 }
 
+function digitCount(value: string): number {
+  return value.replace(/\D/g, '').length;
+}
+
 const leadSchema = z.object({
   name: z.string().trim().min(1, 'Please enter your name.').max(100, 'Please enter a shorter name.'),
   email: z.string().trim().email('Please enter a valid email.').max(254, 'Please enter a shorter email.'),
-  phone: z.string().trim().min(7, 'Please enter a valid phone number.').max(40, 'Please enter a shorter phone number.'),
+  phone: z.string().trim().superRefine((value, ctx) => {
+    const digits = digitCount(value);
+    if (!/^[0-9+\-().\s]+$/.test(value) || digits < 10) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Please enter a valid phone number.' });
+      return;
+    }
+    if (digits > 15) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Please enter a shorter phone number.' });
+    }
+  }),
   address: z.string().trim().min(5, 'Please enter a valid address.').max(300, 'Please enter a shorter address.'),
   quoteLow: money(10_000_000),
   quoteHigh: money(10_000_000),
@@ -41,25 +54,21 @@ const leadSchema = z.object({
   }
 });
 
-async function sendEmailNotification(lead: z.infer<typeof leadSchema>) {
+async function sendEmailNotification(lead: z.infer<typeof leadSchema>): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn('RESEND_API_KEY not set, skipping email');
-    return;
-  }
+  if (!apiKey) return false;
 
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: 'K&D Roofing <noreply@kanddroofingnc.com>',
-        to: ['todd@kanddroofingnc.com'],
-        subject: `New MeasureNow Lead: ${lead.name}`,
-        html: `
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: 'K&D Roofing <noreply@kanddroofingnc.com>',
+      to: ['todd@kanddroofingnc.com'],
+      subject: `New MeasureNow Lead: ${lead.name}`,
+      html: `
           <h2>New Lead from MeasureNow</h2>
           <table style="border-collapse:collapse;font-family:sans-serif;">
             <tr><td style="padding:6px 12px;font-weight:bold;">Name</td><td style="padding:6px 12px;">${lead.name}</td></tr>
@@ -72,18 +81,14 @@ async function sendEmailNotification(lead: z.infer<typeof leadSchema>) {
             <tr><td style="padding:6px 12px;font-weight:bold;">Pitch</td><td style="padding:6px 12px;">${lead.pitchOver12 ?? 'N/A'}/12 (${lead.avgPitchDegrees ?? 'N/A'}°)</td></tr>
           </table>
         `,
-      }),
-    });
+    }),
+  });
 
-    if (!res.ok) {
-      const body = await res.text();
-      console.error('Resend email error:', res.status, body);
-    } else {
-      console.log('📧 Email notification sent for', lead.name);
-    }
-  } catch (err: any) {
-    console.error('Resend email exception:', err.message);
+  if (!res.ok) {
+    await res.arrayBuffer().catch(() => undefined);
+    return false;
   }
+  return true;
 }
 
 async function pushToJobNimbus(lead: z.infer<typeof leadSchema>) {
@@ -139,38 +144,115 @@ async function pushToJobNimbus(lead: z.infer<typeof leadSchema>) {
   }
 }
 
-leadRouter.post('/capture', leadCaptureRateLimit, async (req: Request, res: Response) => {
-  try {
-    if (rejectIfSpam(req.body, res)) return;
+const TRANSIENT_DRIVER_CODES = new Set([
+  '40001',
+  '40P01',
+  '53300',
+  '55P03',
+  '57P01',
+  '57P02',
+  '57P03',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'ECONNABORTED',
+]);
 
-    const parsed = leadSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.issues[0].message });
+function isTransientDriverError(err: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string') {
+      if (TRANSIENT_DRIVER_CODES.has(code) || /^08[0-9A-Z]{3}$/.test(code)) return true;
     }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
-    const lead = parsed.data;
+async function insertLead(lead: z.infer<typeof leadSchema>): Promise<void> {
+  try {
     await websiteLeadStore().insert(lead);
+  } catch (err) {
+    if (!isTransientDriverError(err)) throw err;
+    await websiteLeadStore().insert(lead);
+  }
+}
 
-    console.log(`📋 New lead captured: ${lead.name} — ${lead.address} — $${lead.quoteLow.toLocaleString()}-$${lead.quoteHigh.toLocaleString()}`);
+function stepMark(ok: boolean): 'ok' | 'fail' {
+  return ok ? 'ok' : 'fail';
+}
 
-    // Fire and forget — don't block user response
-    sendEmailNotification(lead).catch(() => {});
-    pushToJobNimbus(lead).catch(() => {});
+leadRouter.post('/capture', (req: Request, res: Response, next: NextFunction) => {
+  if (rejectIfSpam(req.body, res)) return;
+  const parsed = leadSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0].message });
+    return;
+  }
+  next();
+}, leadCaptureRateLimit, async (req: Request, res: Response) => {
+  const parsed = leadSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const lead = parsed.data;
 
-    return res.json({ success: true, message: 'Lead captured successfully' });
-  } catch (err: any) {
-    console.error('Lead capture error:', err.message || err);
+  let dbOk = false;
+  let emailOk = false;
+  let jnState: 'called' | 'fail' = 'fail';
+
+  try {
+    await insertLead(lead);
+    dbOk = true;
+  } catch {
+    dbOk = false;
+  }
+
+  try {
+    emailOk = await sendEmailNotification(lead);
+  } catch {
+    emailOk = false;
+  }
+
+  try {
+    await pushToJobNimbus(lead);
+    jnState = 'called';
+  } catch {
+    jnState = 'fail';
+  }
+
+  console.log(`lead delivery db=${stepMark(dbOk)} email=${stepMark(emailOk)} jn=${jnState}`);
+
+  // pushToJobNimbus returns normally when it skips or swallows an error, so jn is never confirmation.
+  if (!dbOk && !emailOk) {
     return res.status(500).json({ error: LEAD_SAVE_ERROR });
   }
+  return res.json({ success: true, message: 'Lead captured successfully' });
 });
 
-// Same list endpoint as before. Rows now come from website_leads.
-leadRouter.get('/list', async (_req: Request, res: Response) => {
+function requireLogin(req: Request, res: Response, next: NextFunction): void {
+  if (!(req.session as { userId?: number } | undefined)?.userId) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  next();
+}
+
+// Same session check the report routes use. Rows come from website_leads.
+// Capturing a quote stays public. A roof API key is not a session.
+leadRouter.get('/list', requireLogin, async (_req: Request, res: Response) => {
   try {
     const leads = await websiteLeadStore().list();
     return res.json({ count: leads.length, leads });
-  } catch (err: any) {
-    console.error('Lead list error:', err.message || err);
+  } catch {
+    console.error('lead list db=fail');
     return res.status(500).json({ error: 'Failed to load leads.' });
   }
 });
