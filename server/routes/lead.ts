@@ -230,7 +230,8 @@ leadRouter.post('/capture', (req: Request, res: Response, next: NextFunction) =>
 
   console.log(`lead delivery db=${stepMark(dbOk)} email=${stepMark(emailOk)} jn=${jnState}`);
 
-  if (!dbOk && !emailOk && jnState === 'fail') {
+  // pushToJobNimbus returns normally when it skips or swallows an error, so jn is never confirmation.
+  if (!dbOk && !emailOk) {
     return res.status(500).json({ error: LEAD_SAVE_ERROR });
   }
   return res.json({ success: true, message: 'Lead captured successfully' });

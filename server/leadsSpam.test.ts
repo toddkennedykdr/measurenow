@@ -55,7 +55,9 @@ type Call = { host: string; path: string; authorization: string | null; body: st
 const calls: Call[] = [];
 const timeline: string[] = [];
 let restoreFetch = () => {};
-let failDelivery = false;
+type UpstreamMode = 'ok' | 'http500' | 'throw';
+let resendMode: UpstreamMode = 'ok';
+let jobNimbusMode: UpstreamMode = 'ok';
 const consoleFns = {
   log: console.log,
   warn: console.warn,
@@ -136,11 +138,16 @@ function installFetchMock() {
       body,
     });
     timeline.push(url.hostname);
-    if (failDelivery && (url.hostname === 'app.jobnimbus.com' || url.hostname === 'api.resend.com')) {
-      return new Response('upstream-secret', { status: 502 });
+    if (url.hostname === 'api.resend.com') {
+      if (resendMode === 'throw') throw new Error('resend down');
+      if (resendMode === 'http500') return new Response('upstream-secret', { status: 500 });
+      return Response.json({ id: 'test-email' });
     }
-    if (url.hostname === 'app.jobnimbus.com') return Response.json({ id: 'test-contact' });
-    if (url.hostname === 'api.resend.com') return Response.json({ id: 'test-email' });
+    if (url.hostname === 'app.jobnimbus.com') {
+      if (jobNimbusMode === 'throw') throw new Error('jobnimbus down');
+      if (jobNimbusMode === 'http500') return new Response('upstream-secret', { status: 500 });
+      return Response.json({ id: 'test-contact' });
+    }
     if (url.hostname === 'maps.googleapis.com' && url.pathname === '/maps/api/geocode/json') {
       return Response.json({
         status: 'OK',
@@ -234,6 +241,37 @@ async function postLead(body: unknown, ip = nextIp()) {
   return { status: res.status, json: text ? JSON.parse(text) as { error?: string; success?: boolean } : {} };
 }
 
+async function withDeliveryLog(run: (lines: string[]) => Promise<void>) {
+  const lines: string[] = [];
+  const prevLog = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map((arg) => String(arg)).join(' '));
+  };
+  try {
+    await run(lines);
+  } finally {
+    console.log = prevLog;
+  }
+}
+
+function failingStore(message: string, code?: string): WebsiteLeadStore {
+  return {
+    async insert() {
+      timeline.push('save');
+      const err = new Error(message);
+      if (code) (err as { code?: string }).code = code;
+      throw err;
+    },
+    async list() {
+      return [];
+    },
+  };
+}
+
+function deliveryLine(lines: string[]): string | undefined {
+  return lines.find((line) => line.startsWith('lead delivery '));
+}
+
 describe('website leads and public spam checks', { concurrency: false }, () => {
   before(async () => {
     console.log = () => {};
@@ -263,7 +301,8 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
   beforeEach(() => {
     calls.length = 0;
     timeline.length = 0;
-    failDelivery = false;
+    resendMode = 'ok';
+    jobNimbusMode = 'ok';
     delete process.env.JN_API_KEY;
     delete process.env.RESEND_API_KEY;
     delete process.env.JOBNIMBUS_API_KEY;
@@ -554,42 +593,101 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     }
   });
 
-  test('a swallowed JobNimbus error stays called and does not hide a partial delivery', async () => {
+  test('a missing website_leads table with Resend 500 and JobNimbus 500 returns the save error', async () => {
     process.env.JN_API_KEY = JN_API_KEY_DUMMY;
     process.env.RESEND_API_KEY = JN_API_KEY_DUMMY;
-    failDelivery = true;
-    const lines: string[] = [];
-    const prevLog = console.log;
-    console.log = (...args: unknown[]) => {
-      lines.push(args.map((arg) => String(arg)).join(' '));
-    };
-    setWebsiteLeadStoreForTests({
-      async insert() {
-        timeline.push('save');
-        const err = new Error('unique');
-        (err as { code?: string }).code = '23505';
-        throw err;
-      },
-      async list() {
-        return [];
-      },
-    });
-    try {
+    resendMode = 'http500';
+    jobNimbusMode = 'http500';
+    setWebsiteLeadStoreForTests(failingStore('relation "website_leads" does not exist', '42P01'));
+    await withDeliveryLog(async (lines) => {
       const failed = await postLead(leadBody());
-      assert.equal(failed.status, 200);
-      assert.equal(failed.json.success, true);
-      assert.deepEqual(timeline.filter((event) => event === 'save'), ['save']);
-      assert.equal(calls.filter((call) => call.host === 'api.resend.com').length, 1);
+      assert.equal(failed.status, 500);
+      assert.deepEqual(failed.json, { error: LEAD_SAVE_ERROR });
+      assert.match(failed.json.error || '', /919-977-4074/);
+      assert.deepEqual(timeline, ['save', 'api.resend.com', 'app.jobnimbus.com']);
+      const email = calls.find((call) => call.host === 'api.resend.com');
+      assert.ok(email);
+      assert.equal((JSON.parse(email.body) as { subject: string }).subject, 'New MeasureNow Lead: Pat Example');
       assert.equal(calls.filter((call) => call.host === 'app.jobnimbus.com').length, 1);
-      const delivery = lines.find((line) => line.startsWith('lead delivery '));
+      const delivery = deliveryLine(lines);
       assert.equal(delivery, 'lead delivery db=fail email=fail jn=called');
+      assert.equal(delivery?.includes('website_leads'), false);
       assert.equal(delivery?.includes('pat@example.com'), false);
       assert.equal(delivery?.includes('upstream-secret'), false);
-      assert.equal(delivery?.includes('unique'), false);
-      assert.equal(delivery?.includes('23505'), false);
-    } finally {
-      console.log = prevLog;
-    }
+      assert.equal(delivery?.includes('42P01'), false);
+    });
+  });
+
+  test('postgres down with Resend and JobNimbus both throwing returns the save error', async () => {
+    process.env.JN_API_KEY = JN_API_KEY_DUMMY;
+    process.env.RESEND_API_KEY = JN_API_KEY_DUMMY;
+    resendMode = 'throw';
+    jobNimbusMode = 'throw';
+    setWebsiteLeadStoreForTests(failingStore('connect ECONNREFUSED', 'ECONNREFUSED'));
+    await withDeliveryLog(async (lines) => {
+      const failed = await postLead(leadBody());
+      assert.equal(failed.status, 500);
+      assert.deepEqual(failed.json, { error: LEAD_SAVE_ERROR });
+      assert.deepEqual(timeline, ['save', 'save', 'api.resend.com', 'app.jobnimbus.com']);
+      assert.equal(calls.filter((call) => call.host === 'api.resend.com').length, 1);
+      assert.equal(calls.filter((call) => call.host === 'app.jobnimbus.com').length, 1);
+      const delivery = deliveryLine(lines);
+      assert.equal(delivery, 'lead delivery db=fail email=fail jn=called');
+      assert.equal(delivery?.includes('ECONNREFUSED'), false);
+      assert.equal(delivery?.includes('resend down'), false);
+      assert.equal(delivery?.includes('jobnimbus down'), false);
+      assert.equal(failed.json.error?.includes('resend down'), false);
+      assert.equal(failed.json.error?.includes('jobnimbus down'), false);
+    });
+  });
+
+  test('postgres down with email and JobNimbus keys unset returns the save error', async () => {
+    delete process.env.RESEND_API_KEY;
+    delete process.env.JN_API_KEY;
+    delete process.env.JOBNIMBUS_API_KEY;
+    setWebsiteLeadStoreForTests(failingStore('connect ECONNREFUSED', 'ECONNREFUSED'));
+    await withDeliveryLog(async (lines) => {
+      const failed = await postLead(leadBody());
+      assert.equal(failed.status, 500);
+      assert.deepEqual(failed.json, { error: LEAD_SAVE_ERROR });
+      assert.deepEqual(timeline, ['save', 'save']);
+      assert.equal(calls.length, 0);
+      const delivery = deliveryLine(lines);
+      assert.equal(delivery, 'lead delivery db=fail email=fail jn=called');
+      assert.equal(delivery?.includes('ECONNREFUSED'), false);
+      assert.equal(delivery?.includes('Pat Example'), false);
+    });
+  });
+
+  test('an email failure with a successful database save returns success', async () => {
+    process.env.JN_API_KEY = JN_API_KEY_DUMMY;
+    process.env.RESEND_API_KEY = JN_API_KEY_DUMMY;
+    resendMode = 'http500';
+    await withDeliveryLog(async (lines) => {
+      const saved = await postLead(leadBody());
+      assert.equal(saved.status, 200);
+      assert.equal(saved.json.success, true);
+      assert.deepEqual(timeline, ['save', 'api.resend.com', 'app.jobnimbus.com']);
+      const delivery = deliveryLine(lines);
+      assert.equal(delivery, 'lead delivery db=ok email=fail jn=called');
+      assert.equal(delivery?.includes('upstream-secret'), false);
+      assert.equal(delivery?.includes('pat@example.com'), false);
+    });
+  });
+
+  test('a saved lead and a sent email return success', async () => {
+    process.env.JN_API_KEY = JN_API_KEY_DUMMY;
+    process.env.RESEND_API_KEY = JN_API_KEY_DUMMY;
+    await withDeliveryLog(async (lines) => {
+      const saved = await postLead(leadBody());
+      assert.equal(saved.status, 200);
+      assert.equal(saved.json.success, true);
+      assert.deepEqual(timeline, ['save', 'api.resend.com', 'app.jobnimbus.com']);
+      const delivery = deliveryLine(lines);
+      assert.equal(delivery, 'lead delivery db=ok email=ok jn=called');
+      assert.equal(delivery?.includes('Pat Example'), false);
+      assert.equal(delivery?.includes('pat@example.com'), false);
+    });
   });
 
   test('a transient insert error is retried once and then delivered', async () => {
