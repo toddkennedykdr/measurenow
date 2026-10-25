@@ -23,10 +23,7 @@ export function NavBar() {
           <Link to="/inspect" className={item(path === '/inspect')}>Inspect</Link>
         </>
       ) : (
-        <>
-          <Link to="/" className={item(path === '/' || path === '/quote')}>Instant Quote</Link>
-          <Link to="/inspect" className={item(path === '/inspect')}>Inspection Tool</Link>
-        </>
+        <Link to="/" className={item(path === '/' || path === '/quote')}>Instant Quote</Link>
       )}
       <div className="appbar__spacer" />
       {user ? (

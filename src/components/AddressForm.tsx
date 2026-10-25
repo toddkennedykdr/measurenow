@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react';
+import { HoneypotField } from './HoneypotField';
+import { usePublicFormGuard } from '../publicFormGuard';
 import type { GeocodeResponse } from '../types';
 
 interface Props {
@@ -9,6 +11,7 @@ export function AddressForm({ onGeocoded }: Props) {
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -22,7 +25,7 @@ export function AddressForm({ onGeocoded }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ address: address.trim() }),
+        body: JSON.stringify({ address: address.trim(), ...extras }),
       });
 
       const data = await res.json();
@@ -50,6 +53,7 @@ export function AddressForm({ onGeocoded }: Props) {
       {error && <div className="error-msg">{error}</div>}
 
       <form onSubmit={handleSubmit}>
+        <HoneypotField id="contact-pref-address" value={contactPref} onChange={setContactPref} />
         <div className="form-group">
           <label htmlFor="address">Property Address</label>
           <input

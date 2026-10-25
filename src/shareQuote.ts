@@ -10,6 +10,25 @@ export interface ShareEnv {
   legacyCopy?: (text: string) => boolean;
 }
 
+export function publicInspectUrl(origin: string, address: string): string {
+  const url = new URL('/inspect', origin);
+  url.searchParams.set('address', address.trim());
+  return url.toString();
+}
+
+function sharePageUrl(pageUrl: string, address: string): string {
+  try {
+    const parsed = new URL(pageUrl);
+    const path = parsed.pathname.replace(/\/+$/, '') || '/';
+    if (path === '/reports' || path.startsWith('/reports/')) {
+      return publicInspectUrl(parsed.origin, address);
+    }
+  } catch {
+    return pageUrl;
+  }
+  return pageUrl;
+}
+
 export function buildSharePayload(input: {
   address: string;
   lowLabel: string;
@@ -26,7 +45,7 @@ export function buildSharePayload(input: {
   return {
     title: 'K&D Roofing quote',
     text: lines.join('\n'),
-    url: input.pageUrl,
+    url: sharePageUrl(input.pageUrl, input.address),
   };
 }
 

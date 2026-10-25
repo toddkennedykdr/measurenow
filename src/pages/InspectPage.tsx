@@ -5,7 +5,9 @@ import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
 import { ShareQuoteButton } from '../components/ShareQuoteButton';
 import { useAuth } from '../context/AuthContext';
-import { buildSharePayload } from '../shareQuote';
+import { HoneypotField } from '../components/HoneypotField';
+import { usePublicFormGuard } from '../publicFormGuard';
+import { buildSharePayload, publicInspectUrl } from '../shareQuote';
 import { conditionColor, severityColor } from '../statusColors';
 
 // Types
@@ -161,8 +163,8 @@ export default function InspectPage() {
   const [reportSent, setReportSent] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [showJN, setShowJN] = useState(false);
-  const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const { user } = useAuth();
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -190,7 +192,7 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ address: address.trim() }),
+        body: JSON.stringify({ address: address.trim(), ...extras }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -244,7 +246,7 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ lat: useLat, lng: useLng }),
+        body: JSON.stringify({ lat: useLat, lng: useLng, ...extras }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -302,14 +304,12 @@ export default function InspectPage() {
           ...extraPhotos.map(p => p.file),
         ];
         const thumbnails = await Promise.all(allFiles.map(f => fileToThumbnail(f)));
-        const saveRes = await fetch('/api/reports', {
+        await fetch('/api/reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote, photos: thumbnails }),
         });
-        const saveData = await saveRes.json();
-        if (saveData.id) setSavedReportId(saveData.id);
       } catch {}
     } catch (err: any) {
       setError(err.message || 'Analysis failed');
@@ -406,6 +406,7 @@ export default function InspectPage() {
               autoFocus
             />
           </div>
+          <HoneypotField id="contact-pref-inspect" value={contactPref} onChange={setContactPref} />
           <button className="btn btn--primary" onClick={handleGeocode} disabled={loading}>
             {loading && <span className="spinner" />}
             {loading ? 'Finding...' : 'Find Property'}
@@ -422,6 +423,7 @@ export default function InspectPage() {
           {pinDragged && (
             <p className="inspect-pin-note">📌 Pin moved — using updated location</p>
           )}
+          <HoneypotField id="contact-pref-inspect-confirm" value={contactPref} onChange={setContactPref} />
           <div className="confirm-buttons">
             <button className="btn btn--primary" onClick={handleConfirmLocation} disabled={loading}>
               {loading && <span className="spinner" />}
@@ -606,7 +608,7 @@ export default function InspectPage() {
                 lowLabel: formatPrice(adjLow + sidingLow),
                 highLabel: formatPrice(adjHigh + sidingHigh),
                 detail: `${roofArea.toLocaleString()} sq ft · ${roofSquares} squares`,
-                pageUrl: savedReportId ? `${window.location.origin}/reports/${savedReportId}` : window.location.href,
+                pageUrl: publicInspectUrl(window.location.origin, address),
               })}
             />
             {user && (
