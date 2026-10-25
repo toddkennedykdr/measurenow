@@ -5,6 +5,7 @@ import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
 import { QuoteResult } from './components/QuoteResult';
 import { ThankYou } from './components/ThankYou';
+import type { PublicFormExtras } from './publicFormGuard';
 
 export default function App() {
   const [step, setStep] = useState<Step>('address');
@@ -17,13 +18,13 @@ export default function App() {
     setStep('confirm');
   };
 
-  const handleLocationConfirmed = async (lat: number, lng: number) => {
+  const handleLocationConfirmed = async (lat: number, lng: number, extras: PublicFormExtras) => {
     // Call quote API with confirmed coordinates
     const res = await fetch('/api/roof/quote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ lat, lng }),
+      body: JSON.stringify({ lat, lng, ...extras }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to get quote');

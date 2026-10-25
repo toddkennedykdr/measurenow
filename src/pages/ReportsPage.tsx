@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { useAuth } from '../context/AuthContext';
 import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
+import { conditionColor } from '../statusColors';
 
 interface Report {
   id: number;
@@ -12,15 +13,9 @@ interface Report {
   roofData: any;
 }
 
-function conditionColor(c: string) {
-  if (c === 'poor') return '#E2312B';
-  if (c === 'fair') return '#ca8a04';
-  return '#16a34a';
-}
-
 export function ReportListMeta({ date, sqft }: { date: string; sqft?: number | null }) {
   return (
-    <div style={{ fontSize: 12, color: '#6b7280' }}>
+    <div style={{ fontSize: 14, color: 'var(--text-2)' }}>
       {date}{sqft ? ` · ${sqft.toLocaleString()} sq ft · ${AI_ESTIMATE_LABEL}` : ''}
     </div>
   );
@@ -52,7 +47,7 @@ export default function ReportsPage() {
         <div className="card" style={{ textAlign: 'center', padding: 40 }}>Loading reports...</div>
       ) : reports.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-          <p style={{ fontSize: 16, color: '#6b7280' }}>No reports yet.</p>
+          <p style={{ fontSize: 16, color: 'var(--text-2)' }}>No reports yet.</p>
           <Link to="/inspect" className="btn btn--primary" style={{ display: 'inline-block', marginTop: 12, textDecoration: 'none' }}>Start an Inspection</Link>
         </div>
       ) : (
@@ -69,7 +64,7 @@ export default function ReportsPage() {
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#032D59', lineHeight: 1.3 }}>{r.address}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--navy)', lineHeight: 1.3 }}>{r.address}</div>
                     <span style={{ background: conditionColor(condition), color: 'white', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', marginLeft: 8 }}>
                       {condition.toUpperCase()}
                     </span>
