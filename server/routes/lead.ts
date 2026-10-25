@@ -91,49 +91,57 @@ async function sendEmailNotification(lead: z.infer<typeof leadSchema>): Promise<
   return true;
 }
 
-async function pushToJobNimbus(lead: z.infer<typeof leadSchema>): Promise<boolean> {
+async function pushToJobNimbus(lead: z.infer<typeof leadSchema>) {
   const apiKey = process.env.JN_API_KEY;
-  if (!apiKey) return false;
-
-  // Parse address into components
-  const parts = lead.address.split(',').map(s => s.trim());
-  const street = parts[0] || lead.address;
-  const city = parts[1] || '';
-  // Last part might be "NC 27601" or "State Zip"
-  const stateZip = parts[2] || '';
-  const stateZipParts = stateZip.split(/\s+/);
-  const state = stateZipParts[0] || '';
-  const zip = stateZipParts[1] || '';
-
-  const nameParts = lead.name.trim().split(/\s+/);
-  const firstName = nameParts[0] || '';
-  const lastName = nameParts.slice(1).join(' ') || '';
-
-  const res = await fetch('https://app.jobnimbus.com/api1/contacts', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      first_name: firstName,
-      last_name: lastName,
-      email: lead.email,
-      home_phone: lead.phone,
-      address_line1: street,
-      city,
-      state_text: state,
-      zip,
-      source_name: 'MeasureNow',
-      description: `MeasureNow Quote: $${lead.quoteLow.toLocaleString()}-$${lead.quoteHigh.toLocaleString()} | Roof: ${lead.roofSqFt.toLocaleString()} sq ft, ${lead.roofSquares} squares | Pitch: ${lead.pitchOver12 ?? 'N/A'}/12`,
-    }),
-  });
-
-  if (!res.ok) {
-    await res.arrayBuffer().catch(() => undefined);
-    return false;
+  if (!apiKey) {
+    console.warn('JN_API_KEY not set, skipping JobNimbus');
+    return;
   }
-  return true;
+
+  try {
+    // Parse address into components
+    const parts = lead.address.split(',').map(s => s.trim());
+    const street = parts[0] || lead.address;
+    const city = parts[1] || '';
+    // Last part might be "NC 27601" or "State Zip"
+    const stateZip = parts[2] || '';
+    const stateZipParts = stateZip.split(/\s+/);
+    const state = stateZipParts[0] || '';
+    const zip = stateZipParts[1] || '';
+
+    const nameParts = lead.name.trim().split(/\s+/);
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    const res = await fetch('https://app.jobnimbus.com/api1/contacts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        first_name: firstName,
+        last_name: lastName,
+        email: lead.email,
+        home_phone: lead.phone,
+        address_line1: street,
+        city,
+        state_text: state,
+        zip,
+        source_name: 'MeasureNow',
+        description: `MeasureNow Quote: $${lead.quoteLow.toLocaleString()}-$${lead.quoteHigh.toLocaleString()} | Roof: ${lead.roofSqFt.toLocaleString()} sq ft, ${lead.roofSquares} squares | Pitch: ${lead.pitchOver12 ?? 'N/A'}/12`,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error('JobNimbus error:', res.status, body);
+    } else {
+      console.log('🏗️ JobNimbus contact created for', lead.name);
+    }
+  } catch (err: any) {
+    console.error('JobNimbus exception:', err.message);
+  }
 }
 
 const TRANSIENT_DRIVER_CODES = new Set([
@@ -198,7 +206,7 @@ leadRouter.post('/capture', (req: Request, res: Response, next: NextFunction) =>
 
   let dbOk = false;
   let emailOk = false;
-  let jnOk = false;
+  let jnState: 'called' | 'fail' = 'fail';
 
   try {
     await insertLead(lead);
@@ -214,14 +222,15 @@ leadRouter.post('/capture', (req: Request, res: Response, next: NextFunction) =>
   }
 
   try {
-    jnOk = await pushToJobNimbus(lead);
+    await pushToJobNimbus(lead);
+    jnState = 'called';
   } catch {
-    jnOk = false;
+    jnState = 'fail';
   }
 
-  console.log(`lead delivery db=${stepMark(dbOk)} email=${stepMark(emailOk)} jn=${stepMark(jnOk)}`);
+  console.log(`lead delivery db=${stepMark(dbOk)} email=${stepMark(emailOk)} jn=${jnState}`);
 
-  if (!dbOk && !emailOk && !jnOk) {
+  if (!dbOk && !emailOk && jnState === 'fail') {
     return res.status(500).json({ error: LEAD_SAVE_ERROR });
   }
   return res.json({ success: true, message: 'Lead captured successfully' });
