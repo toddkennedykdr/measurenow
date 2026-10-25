@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { useAuth } from '../context/AuthContext';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
 import { conditionColor } from '../statusColors';
 
 interface Report {
@@ -10,6 +11,14 @@ interface Report {
   createdAt: string;
   analysis: any;
   roofData: any;
+}
+
+export function ReportListMeta({ date, sqft }: { date: string; sqft?: number | null }) {
+  return (
+    <div style={{ fontSize: 14, color: 'var(--text-2)' }}>
+      {date}{sqft ? ` · ${sqft.toLocaleString()} sq ft · ${AI_ESTIMATE_LABEL}` : ''}
+    </div>
+  );
 }
 
 export default function ReportsPage() {
@@ -60,9 +69,7 @@ export default function ReportsPage() {
                       {condition.toUpperCase()}
                     </span>
                   </div>
-                  <div style={{ fontSize: 14, color: 'var(--text-2)' }}>
-                    {date}{sqft ? ` · ${sqft.toLocaleString()} sq ft` : ''}
-                  </div>
+                  <ReportListMeta date={date} sqft={sqft} />
                 </div>
               </Link>
             );

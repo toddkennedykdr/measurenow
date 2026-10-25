@@ -8,6 +8,7 @@ import session from 'express-session';
 import { QuoteResult } from '../src/components/QuoteResult';
 import { RoofDiagram } from '../src/components/RoofDiagram';
 import { ThankYou } from '../src/components/ThankYou';
+import { ReportListMeta } from '../src/pages/ReportsPage';
 import type { FullQuoteData } from '../src/types';
 import { JN_API_KEY_DUMMY } from './allowed-literals';
 import { mountRoofRoutes } from '../server/mountRoof';
@@ -350,6 +351,9 @@ describe('quote honesty', { concurrency: false }, () => {
       assert.equal(resendBodies.length, 1);
       const html = JSON.parse(resendBodies[0]).html as string;
       assert.match(html, new RegExp(AI_ESTIMATE_LABEL));
+      assert.match(quoteTotalRow(html), new RegExp(AI_ESTIMATE_LABEL));
+      assert.match(quoteTotalRow(html), /\$/);
+      assert.match(html, /\*Estimates based on satellite data \+ AI photo analysis\. Final pricing subject to on-site confirmation\./);
       assert.match(html, /Satellite imagery: April 6, 2021/);
       assert.match(html, /more than one building/);
 
@@ -365,9 +369,19 @@ describe('quote honesty', { concurrency: false }, () => {
       assert.equal(undated.status, 200);
       const plain = JSON.parse(resendBodies[1]).html as string;
       assert.match(plain, new RegExp(AI_ESTIMATE_LABEL));
+      assert.match(quoteTotalRow(plain), new RegExp(AI_ESTIMATE_LABEL));
+      assert.match(plain, /\*Estimates based on satellite data \+ AI photo analysis\. Final pricing subject to on-site confirmation\./);
       assert.equal(plain.includes('Satellite imagery'), false);
       assert.equal(plain.includes('more than one building'), false);
     });
+  });
+
+  it('labels square feet on the staff reports list as an AI estimate', () => {
+    const listed = renderToStaticMarkup(createElement(ReportListMeta, { date: 'Apr 6, 2021', sqft: 2153 }));
+    assert.ok(listed.includes(`${(2153).toLocaleString()} sq ft · ${AI_ESTIMATE_LABEL}`));
+    const empty = renderToStaticMarkup(createElement(ReportListMeta, { date: 'Apr 6, 2021', sqft: null }));
+    assert.equal(empty.includes('sq ft'), false);
+    assert.equal(empty.includes(AI_ESTIMATE_LABEL), false);
   });
 
   it('labels the quote and the roof diagram without inventing an imagery date', () => {
@@ -430,6 +444,14 @@ describe('quote honesty', { concurrency: false }, () => {
     assert.match(thanks, /building size on file/);
   });
 });
+
+function quoteTotalRow(html: string): string {
+  const start = html.indexOf('>Total Estimated');
+  assert.ok(start >= 0);
+  const end = html.indexOf('</tr>', start);
+  assert.ok(end > start);
+  return html.slice(start, end);
+}
 
 async function withServer(fn: (base: string, cookie: string) => Promise<void>) {
   const app = express();
