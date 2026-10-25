@@ -3,8 +3,11 @@ import { z } from 'zod';
 import { roofApiKeyMatches } from '../middleware/roofAccess';
 import { rejectIfPublicDailyCap } from '../publicDailyCap';
 import { geocodeAddress } from '../services/geocode';
+import { MAP_SERVICE_ERROR, MapServiceError } from '../services/mapService';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote, type RoofQuote } from '../services/pricing';
+import { assessQuoteHonesty } from '../services/quoteHonesty';
+import { rejectIfSpam } from '../spamGuard';
 
 export const roofRouter = Router();
 
@@ -31,17 +34,21 @@ function skipsPublicDailyCap(req: Request): boolean {
 }
 
 const addressSchema = z.object({
-  address: z.string().min(5, 'Please enter a valid address'),
+  address: z.string().trim().min(5, 'Please enter a valid address').max(300, 'Please enter a shorter address.'),
 });
 
 const quoteSchema = z.object({
-  lat: z.number(),
-  lng: z.number(),
+  lat: z.number().finite().min(-90).max(90),
+  lng: z.number().finite().min(-180).max(180),
 });
 
 // Step 1: Geocode only — returns lat/lng and formatted address
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
   try {
+    // Per-IP limiting stays on roofRateLimit (req.ip, one trusted proxy hop).
+    // Staff and a roof API key already skip the public daily cap. They also
+    // skip the public honeypot and timer.
+    if (!skipsPublicDailyCap(req) && rejectIfSpam(req.body, res)) return;
     const parsed = addressSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -60,8 +67,12 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
       lat: location.lat,
       lng: location.lng,
     });
-  } catch (err: any) {
-    console.error('Geocode error:', err.message || err);
+  } catch (err: unknown) {
+    if (err instanceof MapServiceError) {
+      console.error('Geocode error: map service unavailable');
+      return res.status(503).json({ error: MAP_SERVICE_ERROR });
+    }
+    console.error('Geocode error:', err instanceof Error ? err.name : 'Error');
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
@@ -69,6 +80,7 @@ roofRouter.post('/geocode', async (req: Request, res: Response) => {
 // Step 2: Get quote using confirmed lat/lng
 roofRouter.post('/quote', async (req: Request, res: Response) => {
   try {
+    if (!skipsPublicDailyCap(req) && rejectIfSpam(req.body, res)) return;
     const parsed = quoteSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid coordinates.' });
@@ -85,6 +97,17 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
     }
 
     const quote = calculateQuote(building);
+    // No county or parcel building size is stored on this request.
+    const honesty = assessQuoteHonesty({
+      measuredRoofSqFt: building.totalAreaSqFt,
+      imageryQuality: building.imageryQuality,
+      imageryDate: building.imageryDate,
+      segmentBoxes: building.segmentBoxes,
+      wholeRoofAreaSqFt: building.wholeRoofAreaSqFt,
+      wholeRoofGroundSqFt: building.wholeRoofGroundSqFt,
+      buildingGroundSqFt: building.buildingGroundSqFt,
+      parcelBuildingSqFt: null,
+    });
 
     return res.json({
       lat,
@@ -98,11 +121,17 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
         estimatedPerimeterFt: building.estimatedPerimeterFt,
         estimatedLength: building.estimatedLength,
         estimatedWidth: building.estimatedWidth,
+        imageryDateLabel: honesty.imageryDateLabel,
+        warnings: honesty.warnings,
       },
       quote,
     });
-  } catch (err: any) {
-    console.error('Quote error:', err.message || err);
+  } catch (err: unknown) {
+    if (err instanceof MapServiceError) {
+      console.error('Quote error: map service unavailable');
+      return res.status(503).json({ error: MAP_SERVICE_ERROR });
+    }
+    console.error('Quote error:', err instanceof Error ? err.name : 'Error');
     return res.status(500).json({
       error: 'Something went wrong generating your quote. Please try again or call us directly.',
     });

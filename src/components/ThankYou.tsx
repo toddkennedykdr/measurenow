@@ -1,4 +1,6 @@
 import type { FullQuoteData } from '../types';
+import { MeasureWarnings } from './MeasureHonesty';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
 
 interface Props {
   name: string;
@@ -17,19 +19,20 @@ export function ThankYou({ name, data, onStartOver }: Props) {
         <div className="thank-you__icon">🏠</div>
         <h2 className="thank-you__title">Thanks, {firstName}!</h2>
         <p className="thank-you__text">
-          Your estimated roof replacement cost is{' '}
+          Your estimated roof replacement cost ({AI_ESTIMATE_LABEL}) is{' '}
           <strong>
             {formatPrice(data.quote.lowEstimate)} – {formatPrice(data.quote.highEstimate)}
           </strong>
           .
         </p>
+        <MeasureWarnings warnings={data.roofData.warnings} />
         <p className="thank-you__text">
           A K&amp;D Roofing specialist will reach out within 24 hours to schedule your free
           on-site inspection and provide a detailed written estimate.
         </p>
 
-        <a href="tel:+19195551234" className="thank-you__phone">
-          📞 Call Us Now: (919) 555-1234
+        <a href="tel:+19199774074" className="thank-you__phone">
+          Call K&amp;D Roofing: 919-977-4074
         </a>
 
         <div className="next-steps">
@@ -38,7 +41,7 @@ export function ThankYou({ name, data, onStartOver }: Props) {
             <li>We'll call or text you to schedule a free inspection</li>
             <li>Our inspector visits your property (30 min)</li>
             <li>You receive a detailed written estimate within 24 hours</li>
-            <li>No pressure — your quote is good for 30 days</li>
+            <li>Your quote is good for 30 days</li>
           </ul>
         </div>
       </div>

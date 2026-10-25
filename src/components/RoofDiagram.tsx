@@ -1,4 +1,9 @@
 import React from 'react';
+import { MeasureWarnings } from './MeasureHonesty';
+import {
+  DIAGRAM_ESTIMATE_NOTE,
+  satelliteImageryCaption,
+} from '../../server/services/quoteHonesty';
 
 interface RoofSegment {
   areaSqFt: number;
@@ -15,6 +20,8 @@ interface RoofData {
   estimatedPerimeterFt?: number;
   estimatedLength?: number;
   estimatedWidth?: number;
+  imageryDateLabel?: string | null;
+  warnings?: { code?: string; message?: string }[] | null;
 }
 
 interface Analysis {
@@ -109,9 +116,14 @@ export function RoofDiagram({ roofData, analysis }: Props) {
     { label: 'Right', wallW: bWid, pitchDeg: avgPitch },
   ];
 
+  const imageryCaption = satelliteImageryCaption(roofData.imageryDateLabel);
+
   return (
     <div className="card hover-section" style={{ pageBreakInside: 'avoid' }}>
       <h2 className="hover-section__title">📐 Roof & Elevation Diagrams</h2>
+      <p className="ai-estimate-caption">{DIAGRAM_ESTIMATE_NOTE}</p>
+      {imageryCaption ? <p className="roof-imagery-date">{imageryCaption}</p> : null}
+      <MeasureWarnings warnings={roofData.warnings} />
 
       {/* Roof Plan */}
       <div style={{ marginBottom: 24 }}>

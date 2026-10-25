@@ -18,6 +18,7 @@ import {
   takePublicDailySlot,
 } from './publicDailyCap';
 import { roofRouter } from './routes/roof';
+import { MapServiceError } from './services/mapService';
 import { getBuildingInsights } from './services/solar';
 
 const BUSY = 'Our online estimate is busy right now. Please call K&D Roofing at 919-977-4074.';
@@ -126,7 +127,10 @@ describe('roof hardening', { concurrency: false }, () => {
       lines.push(args.map((arg) => String(arg)).join(' '));
     };
     try {
-      assert.equal(await getBuildingInsights(35.78, -78.64), null);
+      await assert.rejects(
+        () => getBuildingInsights(35.78, -78.64),
+        (err: unknown) => err instanceof MapServiceError,
+      );
     } finally {
       console.error = prev;
       globalThis.fetch = prevFetch;
@@ -184,8 +188,9 @@ describe('roof hardening', { concurrency: false }, () => {
     installUpstreamMock();
 
     await withServer(capApp(), async (base) => {
-      const geocodeBody = JSON.stringify({ address: '123 Main St, Raleigh, NC' });
-      const quoteBody = JSON.stringify({ lat: 35.78, lng: -78.64 });
+      const started = Date.now() - 60_000;
+      const geocodeBody = JSON.stringify({ address: '123 Main St, Raleigh, NC', formStartedAt: started });
+      const quoteBody = JSON.stringify({ lat: 35.78, lng: -78.64, formStartedAt: started });
       const post = (path: string, body: string) => fetch(`${base}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -232,7 +237,7 @@ describe('roof hardening', { concurrency: false }, () => {
     installUpstreamMock();
 
     await withServer(capApp(), async (base) => {
-      const body = JSON.stringify({ address: '123 Main St, Raleigh, NC' });
+      const body = JSON.stringify({ address: '123 Main St, Raleigh, NC', formStartedAt: Date.now() - 60_000 });
       const post = (headers: Record<string, string>) => fetch(`${base}/api/roof/geocode`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...headers },
@@ -292,7 +297,7 @@ describe('roof hardening', { concurrency: false }, () => {
       const post = (address: string) => fetch(`${base}/api/roof/geocode`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ address }),
+        body: JSON.stringify({ address, formStartedAt: Date.now() - 60_000 }),
       });
       for (let n = 1; n <= 3; n++) {
         const res = await post('no');

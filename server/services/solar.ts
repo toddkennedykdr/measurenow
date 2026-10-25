@@ -1,4 +1,12 @@
-const SQ_M_TO_SQ_FT = 10.764;
+import { MapServiceError } from './mapService';
+import {
+  SQ_M_TO_SQ_FT,
+  imageryDateFromSolar,
+  segmentBoxesFromStats,
+  squareFeetFromMeters,
+  type ImageryDateParts,
+  type SegmentBox,
+} from './quoteHonesty';
 
 /** Read at call time so dotenv and tests can set the key before a request. */
 function googleSolarApiKey(): string {
@@ -21,6 +29,16 @@ export interface BuildingRoofData {
   estimatedLength: number;
   estimatedWidth: number;
   boundingBox: { sw: { lat: number; lng: number }; ne: { lat: number; lng: number } } | null;
+  /** Solar imageryDate. Null when the response did not include a usable date. */
+  imageryDate: ImageryDateParts | null;
+  /** Roof-segment boxes used to notice separate structures. Empty when none were returned. */
+  segmentBoxes: SegmentBox[];
+  /** wholeRoofStats roof area in sq ft, or null when omitted. */
+  wholeRoofAreaSqFt: number | null;
+  /** wholeRoofStats ground area in sq ft, or null when omitted. */
+  wholeRoofGroundSqFt: number | null;
+  /** buildingStats ground area in sq ft, or null when omitted. Not a county record. */
+  buildingGroundSqFt: number | null;
 }
 
 /**
@@ -48,7 +66,10 @@ export async function getBuildingInsights(
   lat: number,
   lng: number
 ): Promise<BuildingRoofData | null> {
-  // Try HIGH quality first, then fall back
+  // Try HIGH quality first, then fall back.
+  // 404 and an empty segment list are no roof data. Throw only when every
+  // quality we tried failed as a service error.
+  const outcomes: Array<'service' | 'missing'> = [];
   for (const quality of ['HIGH', 'MEDIUM'] as const) {
     const url = new URL('https://solar.googleapis.com/v1/buildingInsights:findClosest');
     url.searchParams.set('location.latitude', lat.toString());
@@ -56,17 +77,39 @@ export async function getBuildingInsights(
     url.searchParams.set('requiredQuality', quality);
     url.searchParams.set('key', googleSolarApiKey());
 
-    const res = await fetch(url.toString());
-    if (res.status === 404) continue; // quality not available, try next
+    let res: Response;
+    try {
+      res = await fetch(url.toString());
+    } catch {
+      // The thrown error can include the request URL, which carries the API key.
+      outcomes.push('service');
+      console.error(`Solar API error (${quality}): network`);
+      continue;
+    }
+    if (res.status === 404) {
+      outcomes.push('missing');
+      continue;
+    }
     if (!res.ok) {
       // Status only. The request URL, and some error bodies, contain the API key.
+      outcomes.push('service');
       console.error(`Solar API error (${quality}):`, res.status);
       continue;
     }
 
-    const data: any = await res.json();
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      outcomes.push('service');
+      console.error(`Solar API error (${quality}): invalid response`);
+      continue;
+    }
     const solar = data.solarPotential;
-    if (!solar?.roofSegmentStats?.length) continue;
+    if (!solar?.roofSegmentStats?.length) {
+      outcomes.push('missing');
+      continue;
+    }
 
     const segments: RoofSegment[] = solar.roofSegmentStats.map((seg: any) => ({
       areaSqFt: (seg.stats?.areaMeters2 || 0) * SQ_M_TO_SQ_FT,
@@ -128,8 +171,16 @@ export async function getBuildingInsights(
       estimatedLength: Math.round(estimatedLength),
       estimatedWidth: Math.round(estimatedWidth),
       boundingBox,
+      imageryDate: imageryDateFromSolar(data.imageryDate),
+      segmentBoxes: segmentBoxesFromStats(solar.roofSegmentStats),
+      wholeRoofAreaSqFt: squareFeetFromMeters(solar.wholeRoofStats?.areaMeters2),
+      wholeRoofGroundSqFt: squareFeetFromMeters(solar.wholeRoofStats?.groundAreaMeters2),
+      buildingGroundSqFt: squareFeetFromMeters(solar.buildingStats?.groundAreaMeters2),
     };
   }
 
+  if (outcomes.length > 0 && outcomes.every((outcome) => outcome === 'service')) {
+    throw new MapServiceError();
+  }
   return null;
 }

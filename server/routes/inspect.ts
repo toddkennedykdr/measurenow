@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { getBuildingInsights, calculateWallArea } from '../services/solar';
+import { AI_ESTIMATE_LABEL, honestyEmailFragment } from '../services/quoteHonesty';
 
 export const inspectRouter = Router();
 
@@ -253,8 +254,8 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
             <span style="background:${condColor(analysis?.sidingCondition?.rating || 'fair')};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${(analysis?.sidingCondition?.rating || 'N/A').toUpperCase()}</span>
           </div>
           <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
-            <tr><td style="padding:6px 0;width:50%"><strong>Total Facade:</strong> ${wallArea.toLocaleString()} sq ft</td><td><strong>Openings:</strong> ${openingsArea.toLocaleString()} sq ft</td></tr>
-            <tr><td style="padding:6px 0"><strong>Net Siding:</strong> ${netWallArea.toLocaleString()} sq ft</td><td><strong>Material:</strong> ${analysis?.sidingMaterial || 'N/A'}</td></tr>
+            <tr><td style="padding:6px 0;width:50%"><strong>Total Facade:</strong> ${wallArea.toLocaleString()} sq ft <span style="font-size:11px;color:#6b7280">${AI_ESTIMATE_LABEL}</span></td><td><strong>Openings:</strong> ${openingsArea.toLocaleString()} sq ft <span style="font-size:11px;color:#6b7280">${AI_ESTIMATE_LABEL}</span></td></tr>
+            <tr><td style="padding:6px 0"><strong>Net Siding:</strong> ${netWallArea.toLocaleString()} sq ft <span style="font-size:11px;color:#6b7280">${AI_ESTIMATE_LABEL}</span></td><td><strong>Material:</strong> ${analysis?.sidingMaterial || 'N/A'}</td></tr>
           </table>
           ${analysis?.estimatedCorners ? `<p style="font-size:13px;color:#6b7280;margin:4px 0">Corners — Inside: ${analysis.estimatedCorners.inside} · Outside: ${analysis.estimatedCorners.outside}${analysis?.estimatedTrimLength ? ` · Trim: ~${analysis.estimatedTrimLength} lin ft` : ''}</p>` : ''}
           <p style="font-size:14px;background:#f9fafb;border-left:3px solid #d1d5db;padding:8px 12px;border-radius:4px">${analysis?.sidingCondition?.notes || ''}</p>
@@ -272,14 +273,15 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
             <h2 style="color:#032D59;margin:0;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px">Roof Summary</h2>
             <span style="background:${condColor(analysis?.overallCondition?.rating || 'fair')};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${(analysis?.overallCondition?.rating || 'N/A').toUpperCase()}</span>
           </div>
+          ${honestyEmailFragment(roofData)}
           <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
-            <tr><td style="padding:6px 0;width:33%"><strong>Area:</strong> ${roofArea.toLocaleString()} sq ft</td><td style="width:33%"><strong>Squares:</strong> ${roofSquares}</td><td><strong>Facets:</strong> ${facets}</td></tr>
-            <tr><td style="padding:6px 0"><strong>Type:</strong> ${analysis?.roofType || 'N/A'}</td><td><strong>Material:</strong> ${analysis?.material?.type || 'N/A'}</td><td><strong>Pitch:</strong> ${quote?.pitchOver12 || 'N/A'}/12</td></tr>
+            <tr><td style="padding:6px 0;width:33%"><strong>Area:</strong> ${roofArea.toLocaleString()} sq ft <span style="font-size:11px;color:#6b7280">${AI_ESTIMATE_LABEL}</span></td><td style="width:33%"><strong>Squares:</strong> ${roofSquares} <span style="font-size:11px;color:#6b7280">${AI_ESTIMATE_LABEL}</span></td><td><strong>Facets:</strong> ${facets} <span style="font-size:11px;color:#6b7280">${AI_ESTIMATE_LABEL}</span></td></tr>
+            <tr><td style="padding:6px 0"><strong>Type:</strong> ${analysis?.roofType || 'N/A'}</td><td><strong>Material:</strong> ${analysis?.material?.type || 'N/A'}</td><td><strong>Pitch:</strong> ${quote?.pitchOver12 || 'N/A'}/12 <span style="font-size:11px;color:#6b7280">${AI_ESTIMATE_LABEL}</span></td></tr>
           </table>
 
           <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Roof Components</h4>
           <table style="width:100%;border-collapse:collapse;font-size:14px">
-            <tr><th style="${thStyle}">Component</th><th style="${thStyle}">Est. Length (ft)</th></tr>
+            <tr><th style="${thStyle}">Component</th><th style="${thStyle}">Length (ft) · ${AI_ESTIMATE_LABEL}</th></tr>
             <tr><td style="${tdStyle}">Ridges / Hips</td><td style="${tdStyle}">${ridgeLen || '—'}</td></tr>
             <tr><td style="${tdStyle}">Valleys</td><td style="${tdStyle}">${valleyLen || '—'}</td></tr>
             <tr><td style="${tdStyle}">Rakes</td><td style="${tdStyle}">${rakeLen || '—'}</td></tr>

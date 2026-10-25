@@ -3,7 +3,14 @@ import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
+import { AiEstimateLabel, MeasureWarnings } from '../components/MeasureHonesty';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
+import { ShareQuoteButton } from '../components/ShareQuoteButton';
 import { useAuth } from '../context/AuthContext';
+import { HoneypotField } from '../components/HoneypotField';
+import { usePublicFormGuard } from '../publicFormGuard';
+import { buildSharePayload, publicInspectUrl } from '../shareQuote';
+import { conditionColor, severityColor } from '../statusColors';
 
 // Types
 interface PhotoSlot {
@@ -21,6 +28,8 @@ interface RoofData {
   estimatedPerimeterFt?: number;
   estimatedLength?: number;
   estimatedWidth?: number;
+  imageryDateLabel?: string | null;
+  warnings?: { code?: string; message?: string }[];
 }
 
 interface BuildingMeasurements {
@@ -134,18 +143,6 @@ function formatPrice(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-function severityColor(s: string) {
-  if (s === 'major') return '#E2312B';
-  if (s === 'minor') return '#ca8a04';
-  return '#16a34a';
-}
-
-function conditionColor(c: string) {
-  if (c === 'poor') return '#E2312B';
-  if (c === 'fair') return '#ca8a04';
-  return '#16a34a';
-}
-
 export default function InspectPage() {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>('address');
@@ -170,11 +167,12 @@ export default function InspectPage() {
   const [reportSent, setReportSent] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [showJN, setShowJN] = useState(false);
-  const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const { user } = useAuth();
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
 
   // Auto-geocode if address param provided
   useEffect(() => {
@@ -183,6 +181,10 @@ export default function InspectPage() {
       setAddress(addr);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (step === 'address') addressRef.current?.focus();
+  }, [step]);
 
   // Geocode
   const handleGeocode = async () => {
@@ -194,7 +196,7 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ address: address.trim() }),
+        body: JSON.stringify({ address: address.trim(), ...extras }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -217,6 +219,7 @@ export default function InspectPage() {
     try {
       const res = await fetch('/api/roof/maps-key', { credentials: 'include' });
       const { key } = await res.json();
+      if (!key) return;
       await loadGoogleMaps(key);
       if (!mapRef.current) return;
       const position = { lat, lng };
@@ -248,7 +251,7 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ lat: useLat, lng: useLng }),
+        body: JSON.stringify({ lat: useLat, lng: useLng, ...extras }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -306,14 +309,12 @@ export default function InspectPage() {
           ...extraPhotos.map(p => p.file),
         ];
         const thumbnails = await Promise.all(allFiles.map(f => fileToThumbnail(f)));
-        const saveRes = await fetch('/api/reports', {
+        await fetch('/api/reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote, photos: thumbnails }),
         });
-        const saveData = await saveRes.json();
-        if (saveData.id) setSavedReportId(saveData.id);
       } catch {}
     } catch (err: any) {
       setError(err.message || 'Analysis failed');
@@ -395,7 +396,10 @@ export default function InspectPage() {
           <h2 className="card__title">Enter Property Address</h2>
           <p className="card__subtitle">Start your on-site inspection</p>
           <div className="form-group">
+            <label htmlFor="inspect-address">Property address</label>
             <input
+              id="inspect-address"
+              ref={addressRef}
               className="input"
               type="text"
               placeholder="123 Main St, Raleigh, NC"
@@ -403,8 +407,11 @@ export default function InspectPage() {
               onChange={e => setAddress(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleGeocode()}
               disabled={loading}
+              autoComplete="street-address"
+              autoFocus
             />
           </div>
+          <HoneypotField id="contact-pref-inspect" value={contactPref} onChange={setContactPref} />
           <button className="btn btn--primary" onClick={handleGeocode} disabled={loading}>
             {loading && <span className="spinner" />}
             {loading ? 'Finding...' : 'Find Property'}
@@ -421,6 +428,7 @@ export default function InspectPage() {
           {pinDragged && (
             <p className="inspect-pin-note">📌 Pin moved — using updated location</p>
           )}
+          <HoneypotField id="contact-pref-inspect-confirm" value={contactPref} onChange={setContactPref} />
           <div className="confirm-buttons">
             <button className="btn btn--primary" onClick={handleConfirmLocation} disabled={loading}>
               {loading && <span className="spinner" />}
@@ -439,18 +447,19 @@ export default function InspectPage() {
           {/* Satellite summary mini */}
           {roofData && quote && (
             <div className="inspect-satellite-mini">
+              <MeasureWarnings warnings={roofData.warnings} />
               <div className="quote-stats">
                 <div className="quote-stat">
                   <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
-                  <span className="quote-stat__label">Sq Ft</span>
+                  <span className="quote-stat__label">Sq Ft<AiEstimateLabel /></span>
                 </div>
                 <div className="quote-stat">
                   <span className="quote-stat__value">{quote.roofSquares}</span>
-                  <span className="quote-stat__label">Squares</span>
+                  <span className="quote-stat__label">Squares<AiEstimateLabel /></span>
                 </div>
                 <div className="quote-stat">
                   <span className="quote-stat__value">{quote.pitchOver12}/12</span>
-                  <span className="quote-stat__label">{quote.pitchCategory}</span>
+                  <span className="quote-stat__label">{quote.pitchCategory}<AiEstimateLabel /></span>
                 </div>
               </div>
             </div>
@@ -599,6 +608,15 @@ export default function InspectPage() {
             <button className="btn btn--outline" onClick={() => window.print()}>
               🖨️ Print Report
             </button>
+            <ShareQuoteButton
+              payload={buildSharePayload({
+                address,
+                lowLabel: formatPrice(adjLow + sidingLow),
+                highLabel: formatPrice(adjHigh + sidingHigh),
+                detail: `${roofArea.toLocaleString()} sq ft · ${roofSquares} squares`,
+                pageUrl: publicInspectUrl(window.location.origin, address),
+              })}
+            />
             {user && (
               <button className="btn btn--secondary" onClick={() => setShowJN(true)}>
                 📤 Send to JobNimbus
@@ -635,7 +653,7 @@ export default function InspectPage() {
               <h2 className="hover-section__title">Siding Summary</h2>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 {buildingMeasurements?.measurementSource === 'satellite' && (
-                  <span className="hover-section__badge" style={{ background: '#2563eb', fontSize: '10px', padding: '3px 8px' }}>
+                  <span className="hover-section__badge" style={{ background: 'var(--blue)', fontSize: '12px', padding: '6px 10px' }}>
                     🛰️ SATELLITE MEASURED
                   </span>
                 )}
@@ -651,14 +669,17 @@ export default function InspectPage() {
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.buildingLength}' × {buildingMeasurements.buildingWidth}'</span>
                   <span className="hover-measurement__label">Building Dimensions</span>
+                  <AiEstimateLabel />
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.footprintSqFt.toLocaleString()}</span>
                   <span className="hover-measurement__label">Footprint (sq ft)</span>
+                  <AiEstimateLabel />
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.buildingPerimeter}'</span>
                   <span className="hover-measurement__label">Perimeter</span>
+                  <AiEstimateLabel />
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.stories} × {buildingMeasurements.wallHeightPerStory}'</span>
@@ -671,14 +692,17 @@ export default function InspectPage() {
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{(buildingMeasurements?.grossWallArea || wallArea).toLocaleString()}</span>
                 <span className="hover-measurement__label">Gross Wall Area (sq ft)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{openingsArea.toLocaleString()}</span>
                 <span className="hover-measurement__label">Openings ({buildingMeasurements?.openingsPercent || 18}%)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{netWallArea.toLocaleString()}</span>
                 <span className="hover-measurement__label">Net Siding (sq ft)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{analysis.sidingMaterial}</span>
@@ -739,14 +763,17 @@ export default function InspectPage() {
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{roofArea.toLocaleString()}</span>
                 <span className="hover-measurement__label">Total Roof Area (sq ft)</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{roofSquares}</span>
                 <span className="hover-measurement__label">Squares</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{facets}</span>
                 <span className="hover-measurement__label">Facets</span>
+                <AiEstimateLabel />
               </div>
               <div className="hover-measurement">
                 <span className="hover-measurement__value">{analysis.roofType}</span>
@@ -758,7 +785,7 @@ export default function InspectPage() {
             <h4 className="hover-table-title">Roof Components</h4>
             <table className="hover-table">
               <thead>
-                <tr><th>Component</th><th>Count</th><th>Est. Length (ft)</th></tr>
+                <tr><th>Component</th><th>Count</th><th>Length (ft) · {AI_ESTIMATE_LABEL}</th></tr>
               </thead>
               <tbody>
                 <tr><td>Ridges / Hips</td><td>{ridgeCount || '—'}</td><td>{ridgeLen || '—'}</td></tr>
@@ -774,6 +801,7 @@ export default function InspectPage() {
             <div className="hover-pitch-display">
               <span className="hover-pitch-value">{quote?.pitchOver12 || '—'}/12</span>
               <span className="hover-pitch-label">{quote?.pitchCategory || ''} — {quote?.avgPitchDegrees?.toFixed(1) || '—'}°</span>
+              <AiEstimateLabel />
             </div>
 
             {/* Features */}
@@ -824,8 +852,7 @@ export default function InspectPage() {
               <span className="hover-complexity__label">Complexity Rating</span>
               <div className="hover-complexity__bar">
                 {[1, 2, 3, 4, 5].map(n => (
-                  <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`}
-                    style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }} />
+                  <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`} />
                 ))}
               </div>
               <span className="hover-complexity__text">{complexityRating}/5 — {analysis.complexity.explanation}</span>
@@ -896,7 +923,7 @@ export default function InspectPage() {
                 </div>
               )}
               <div className="hover-quote-total">
-                <span>Total Estimated</span>
+                <span>Total Estimated <span className="ai-estimate-label" style={{ display: 'inline' }}>{AI_ESTIMATE_LABEL}</span></span>
                 <strong>{formatPrice(adjLow + sidingLow)} – {formatPrice(adjHigh + sidingHigh)}</strong>
               </div>
             </div>

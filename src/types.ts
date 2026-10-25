@@ -12,6 +12,13 @@ export interface QuoteResponse {
     segments: number;
     avgPitchDegrees: number;
     imageryQuality: string;
+    footprintSqFt?: number;
+    estimatedPerimeterFt?: number;
+    estimatedLength?: number;
+    estimatedWidth?: number;
+    /** Formatted Solar imageryDate. Null when the response did not include one. */
+    imageryDateLabel?: string | null;
+    warnings?: { code: string; message: string }[];
   };
   quote: {
     roofSquares: number;

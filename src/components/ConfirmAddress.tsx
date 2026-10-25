@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { HoneypotField } from './HoneypotField';
+import { usePublicFormGuard, type PublicFormExtras } from '../publicFormGuard';
 
 declare global {
   interface Window {
@@ -10,7 +12,7 @@ interface Props {
   address: string;
   lat: number;
   lng: number;
-  onConfirm: (lat: number, lng: number) => Promise<void>;
+  onConfirm: (lat: number, lng: number, extras: PublicFormExtras) => Promise<void>;
   onReject: () => void;
 }
 
@@ -44,6 +46,7 @@ function loadGoogleMaps(apiKey: string): Promise<void> {
 }
 
 export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props) {
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
   const mapRef = useRef<HTMLDivElement>(null);
   const markerRef = useRef<any>(null);
   const [pinDragged, setPinDragged] = useState(false);
@@ -58,6 +61,7 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
       // Get the API key from the server
       const res = await fetch('/api/roof/maps-key', { credentials: 'include' });
       const { key } = await res.json();
+      if (!key) throw new Error('Map unavailable');
       await loadGoogleMaps(key);
 
       if (!mapRef.current) return;
@@ -105,7 +109,7 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
     setLoading(true);
     setError('');
     try {
-      await onConfirm(useLat, useLng);
+      await onConfirm(useLat, useLng, extras);
     } catch (err: any) {
       setError(err.message || 'Failed to get quote. Please try again.');
       setLoading(false);
@@ -142,6 +146,7 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
       )}
 
       {error && <div className="error-msg">{error}</div>}
+      <HoneypotField id="contact-pref-confirm" value={contactPref} onChange={setContactPref} />
 
       <div className="confirm-buttons">
         {!pinDragged ? (

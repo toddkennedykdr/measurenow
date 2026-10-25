@@ -1,3 +1,5 @@
+import { MapServiceError } from './mapService';
+
 export interface GeoLocation {
   lat: number;
   lng: number;
@@ -14,20 +16,43 @@ export async function geocodeAddress(address: string): Promise<GeoLocation | nul
   url.searchParams.set('address', address);
   url.searchParams.set('key', googleSolarApiKey());
 
-  const res = await fetch(url.toString());
+  let res: Response;
+  try {
+    res = await fetch(url.toString());
+  } catch {
+    // The thrown error can include the request URL, which carries the API key.
+    console.error('Geocoding API error: network');
+    throw new MapServiceError();
+  }
+
   if (!res.ok) {
-    throw new Error(`Geocoding API error: ${res.status}`);
+    console.error('Geocoding API error:', res.status);
+    throw new MapServiceError();
   }
 
-  const data: any = await res.json();
-  if (data.status !== 'OK' || !data.results?.length) {
-    return null;
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    console.error('Geocoding API error: invalid response');
+    throw new MapServiceError();
   }
 
-  const result = data.results[0];
-  return {
-    lat: result.geometry.location.lat,
-    lng: result.geometry.location.lng,
-    formattedAddress: result.formatted_address,
-  };
+  if (data.status === 'ZERO_RESULTS') return null;
+
+  const result = data.results?.[0];
+  const lat = result?.geometry?.location?.lat;
+  const lng = result?.geometry?.location?.lng;
+  const formattedAddress = result?.formatted_address;
+  if (
+    data.status === 'OK' &&
+    typeof lat === 'number' &&
+    typeof lng === 'number' &&
+    typeof formattedAddress === 'string'
+  ) {
+    return { lat, lng, formattedAddress };
+  }
+
+  console.error('Geocoding API error:', data.status || 'unknown');
+  throw new MapServiceError();
 }

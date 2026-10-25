@@ -1,5 +1,11 @@
 import { useState, type FormEvent } from 'react';
+import { HoneypotField } from './HoneypotField';
+import { usePublicFormGuard } from '../publicFormGuard';
 import type { FullQuoteData } from '../types';
+import { AiEstimateLabel, MeasureWarnings } from './MeasureHonesty';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
+import { ShareQuoteButton } from './ShareQuoteButton';
+import { buildSharePayload } from '../shareQuote';
 
 interface Props {
   data: FullQuoteData;
@@ -12,6 +18,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const { quote, roofData, address } = data;
 
@@ -43,6 +50,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           roofSquares: quote.roofSquares,
           avgPitchDegrees: quote.avgPitchDegrees,
           pitchOver12: quote.pitchOver12,
+          ...extras,
         }),
       });
 
@@ -66,22 +74,26 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         <p className="quote-result__address">📍 {address}</p>
 
         <div className="quote-result__price">
-          {formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}
+          <span>{formatPrice(quote.lowEstimate)}</span>
+          <span aria-hidden="true">–</span>
+          <span>{formatPrice(quote.highEstimate)}</span>
         </div>
-        <p className="quote-result__price-label">Estimated roof replacement cost</p>
+        <p className="quote-result__price-label">Estimated roof replacement cost · {AI_ESTIMATE_LABEL}</p>
+
+        <MeasureWarnings warnings={roofData.warnings} />
 
         <div className="quote-stats">
           <div className="quote-stat">
             <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
-            <span className="quote-stat__label">Sq Ft</span>
+            <span className="quote-stat__label">Sq Ft<AiEstimateLabel /></span>
           </div>
           <div className="quote-stat">
             <span className="quote-stat__value">{quote.roofSquares}</span>
-            <span className="quote-stat__label">Squares</span>
+            <span className="quote-stat__label">Squares<AiEstimateLabel /></span>
           </div>
           <div className="quote-stat">
             <span className="quote-stat__value">{quote.pitchOver12}/12</span>
-            <span className="quote-stat__label">{quote.pitchCategory} Pitch</span>
+            <span className="quote-stat__label">{quote.pitchCategory} Pitch<AiEstimateLabel /></span>
           </div>
         </div>
 
@@ -89,6 +101,16 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           <strong>Includes:</strong> {quote.materialNote}
         </div>
       </div>
+
+      <ShareQuoteButton
+        payload={buildSharePayload({
+          address,
+          lowLabel: formatPrice(quote.lowEstimate),
+          highLabel: formatPrice(quote.highEstimate),
+          detail: `${roofData.totalAreaSqFt.toLocaleString()} sq ft · ${quote.roofSquares} squares · ${quote.pitchOver12}/12 pitch`,
+          pageUrl: typeof window === 'undefined' ? '' : window.location.href,
+        })}
+      />
 
       <div className="divider" />
 
@@ -100,6 +122,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
       {error && <div className="error-msg">{error}</div>}
 
       <form onSubmit={handleSubmit}>
+        <HoneypotField id="contact-pref-lead" value={contactPref} onChange={setContactPref} />
         <div className="form-group">
           <label htmlFor="name">Full Name</label>
           <input
@@ -132,7 +155,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
             id="phone"
             type="tel"
             className="input"
-            placeholder="(919) 555-1234"
+            placeholder="Mobile number"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             disabled={loading}

@@ -3,11 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
+import { AiEstimateLabel } from '../components/MeasureHonesty';
+import { AI_ESTIMATE_LABEL } from '../../server/services/quoteHonesty';
+import { ShareQuoteButton } from '../components/ShareQuoteButton';
 import { useAuth } from '../context/AuthContext';
+import { buildSharePayload, publicInspectUrl } from '../shareQuote';
+import { conditionColor, severityColor } from '../statusColors';
 
 function formatPrice(n: number) { return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }); }
-function severityColor(s: string) { return s === 'major' ? '#E2312B' : s === 'minor' ? '#ca8a04' : '#16a34a'; }
-function conditionColor(c: string) { return c === 'poor' ? '#E2312B' : c === 'fair' ? '#ca8a04' : '#16a34a'; }
 
 const COMPLEXITY_MULTIPLIERS: Record<number, number> = { 1: 1.0, 2: 1.05, 3: 1.1, 4: 1.15, 5: 1.3 };
 const SIDING_PRICES: Record<string, { low: number; high: number; label: string }> = {
@@ -94,6 +97,15 @@ export default function ReportDetailPage() {
             {pdfBusy ? '⏳ Generating...' : '📄 Download PDF'}
           </button>
           <button className="btn btn--outline" onClick={() => window.print()}>🖨️ Print</button>
+          <ShareQuoteButton
+            payload={buildSharePayload({
+              address,
+              lowLabel: formatPrice(adjLow + sidingLow),
+              highLabel: formatPrice(adjHigh + sidingHigh),
+              detail: `${roofArea.toLocaleString()} sq ft · ${roofSquares} squares`,
+              pageUrl: publicInspectUrl(window.location.origin, address),
+            })}
+          />
           <button className="btn btn--secondary" onClick={() => setShowJN(true)}>📤 Send to JobNimbus</button>
         </div>
 
@@ -123,9 +135,9 @@ export default function ReportDetailPage() {
             </span>
           </div>
           <div className="hover-measurement-grid">
-            <div className="hover-measurement"><span className="hover-measurement__value">{roofArea.toLocaleString()}</span><span className="hover-measurement__label">Total Area (sq ft)</span></div>
-            <div className="hover-measurement"><span className="hover-measurement__value">{roofSquares}</span><span className="hover-measurement__label">Squares</span></div>
-            <div className="hover-measurement"><span className="hover-measurement__value">{quote?.pitchOver12 || '—'}/12</span><span className="hover-measurement__label">Pitch</span></div>
+            <div className="hover-measurement"><span className="hover-measurement__value">{roofArea.toLocaleString()}</span><span className="hover-measurement__label">Total Area (sq ft)</span><AiEstimateLabel /></div>
+            <div className="hover-measurement"><span className="hover-measurement__value">{roofSquares}</span><span className="hover-measurement__label">Squares</span><AiEstimateLabel /></div>
+            <div className="hover-measurement"><span className="hover-measurement__value">{quote?.pitchOver12 || '—'}/12</span><span className="hover-measurement__label">Pitch</span><AiEstimateLabel /></div>
             <div className="hover-measurement"><span className="hover-measurement__value">{analysis?.roofType || 'N/A'}</span><span className="hover-measurement__label">Type</span></div>
           </div>
           <p className="hover-condition-note">{analysis?.overallCondition?.notes || ''}</p>
@@ -151,7 +163,7 @@ export default function ReportDetailPage() {
               </span>
             </div>
             <div className="hover-measurement-grid">
-              <div className="hover-measurement"><span className="hover-measurement__value">{wallArea.toLocaleString()}</span><span className="hover-measurement__label">Wall Area (sq ft)</span></div>
+              <div className="hover-measurement"><span className="hover-measurement__value">{wallArea.toLocaleString()}</span><span className="hover-measurement__label">Wall Area (sq ft)</span><AiEstimateLabel /></div>
               <div className="hover-measurement"><span className="hover-measurement__value">{analysis?.sidingMaterial || 'N/A'}</span><span className="hover-measurement__label">Material</span></div>
             </div>
           </div>
@@ -172,7 +184,7 @@ export default function ReportDetailPage() {
               </div>
             )}
             <div className="hover-quote-total">
-              <span>Total Estimated</span>
+              <span>Total Estimated <span className="ai-estimate-label" style={{ display: 'inline' }}>{AI_ESTIMATE_LABEL}</span></span>
               <strong>{formatPrice(adjLow + sidingLow)} – {formatPrice(adjHigh + sidingHigh)}</strong>
             </div>
           </div>
