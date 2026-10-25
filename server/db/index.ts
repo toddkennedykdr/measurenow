@@ -11,6 +11,16 @@ const pool = new Pool({ connectionString: DATABASE_URL });
 
 export const db: NodePgDatabase<typeof schema> = drizzle(pool, { schema });
 
+/** Read-only check for GET /api/health. Does not create tables or write rows. */
+export async function pingDatabase(): Promise<boolean> {
+  try {
+    const result = await pool.query('SELECT 1');
+    return result.rows.length === 1;
+  } catch {
+    return false;
+  }
+}
+
 export async function initDb() {
   // Create tables
   await pool.query(`

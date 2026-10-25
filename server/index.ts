@@ -11,10 +11,11 @@ import { reportsRouter } from './routes/reports';
 import { jnRouter, warnIfJobNimbusUnconfigured } from './routes/jobnimbus';
 import { mountRoofRoutes } from './mountRoof';
 import { malformedJsonHandler } from './middleware/jsonError';
+import { registerHealthRoute } from './health';
 
 dotenv.config();
 
-import { initDb } from './db';
+import { initDb, pingDatabase } from './db';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -45,6 +46,9 @@ app.use(session({
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   },
 }));
+
+// Login is not required. Registered before the shared /api limiter.
+registerHealthRoute(app, pingDatabase);
 
 // Rate limit: 30 requests per minute per IP
 app.use('/api', rateLimit({

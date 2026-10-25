@@ -57,3 +57,25 @@ A single app that replaces both Hover (~$2,100/mo) and Roofle (TBD/mo) subscript
 ## Owner
 Todd Kennedy — K&D Roofing
 Built by: Stack (coding agent) under Jake Miller's direction
+
+## Health and deploy check
+
+`GET /api/health` needs no login and makes no Google call. It is registered before the shared `/api` rate limit, so a probe does not use that budget.
+
+Response JSON:
+
+- `ok` is true only when the database check succeeds. HTTP status is 200 in that case and 503 otherwise.
+- `commit` is the running build's git sha, or `unknown`.
+- `database` is `up` or `down`.
+
+The sha is the first of `RAILWAY_GIT_COMMIT_SHA`, `GITHUB_SHA`, `SOURCE_VERSION`, and `VERCEL_GIT_COMMIT_SHA` that is 7 to 40 hex characters. Other values are ignored and are not returned. The body has no error text and no other environment values.
+
+The database check runs `SELECT 1`. It does not create tables, write rows, or migrate. Startup still runs the existing database setup before the process listens.
+
+Check a running app against a full 40-character git sha:
+
+```bash
+npm run check-deploy -- https://your-host.example <git-sha>
+```
+
+Leave the sha off to use local `main` (`refs/heads/main`, then `origin/main`). The script sends one GET to the base URL plus `/api/health`. It exits 0 when the commit matches and `ok` is true. It exits non-zero when the commit differs, when `ok` is false, or when the response cannot be read. `npm test` covers this with a mocked fetch and does not call a deployed host.
