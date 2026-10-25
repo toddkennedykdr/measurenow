@@ -52,6 +52,11 @@ type Call = { host: string; path: string; authorization: string | null; body: st
 const calls: Call[] = [];
 const timeline: string[] = [];
 let restoreFetch = () => {};
+const consoleFns = {
+  log: console.log,
+  warn: console.warn,
+  error: console.error,
+};
 let server: http.Server;
 let base = '';
 let octet = 20;
@@ -177,6 +182,9 @@ async function postLead(body: unknown, ip = nextIp()) {
 
 describe('website leads and public spam checks', { concurrency: false }, () => {
   before(async () => {
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
     setSpamClockForTests(() => NOW);
     restoreFetch = installFetchMock();
     process.env.GOOGLE_SOLAR_API_KEY = JN_API_KEY_DUMMY;
@@ -199,6 +207,9 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
   });
 
   after(async () => {
+    console.log = consoleFns.log;
+    console.warn = consoleFns.warn;
+    console.error = consoleFns.error;
     restoreFetch();
     resetSpamClockForTests();
     resetWebsiteLeadStoreForTests();
@@ -274,11 +285,12 @@ describe('website leads and public spam checks', { concurrency: false }, () => {
     assert.match(indexSrc, /app\.set\('trust proxy', 1\)/);
     assert.equal(/trust proxy',\s*true/.test(indexSrc), false);
     const limiter = readFileSync(path.join(here, 'leadRateLimit.ts'), 'utf8');
-    assert.match(limiter, /req\.ip/);
-    assert.equal(/x-forwarded-for/i.test(limiter), false);
+    assert.match(limiter, /return req\.ip \|\| 'unknown'/);
+    assert.match(limiter, /keyGenerator: \(req\) => clientIp\(req\)/);
     const roof = readFileSync(path.join(here, 'middleware/roofAccess.ts'), 'utf8');
-    assert.match(roof, /req\.ip \|\| 'unknown'/);
-    assert.equal(/x-forwarded-for/i.test(roof), false);
+    const roofKey = roof.slice(roof.indexOf('keyGenerator'));
+    assert.match(roofKey, /return req\.ip \|\| 'unknown'/);
+    assert.equal(/x-forwarded-for/i.test(roofKey), false);
 
     const open = express();
     open.get('/who', (req, res) => res.json({ ip: req.ip }));

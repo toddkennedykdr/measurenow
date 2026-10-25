@@ -32,7 +32,7 @@ export function resetSpamClockForTests(): void {
 }
 
 function isBlankHoneypot(value: unknown): boolean {
-  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+  return value === undefined || value === null || value === '';
 }
 
 /** Hidden field must be empty, and the form must have been open for a short moment. */
