@@ -1,5 +1,9 @@
 import { useState, type FormEvent } from 'react';
+import { HoneypotField } from './HoneypotField';
+import { usePublicFormGuard } from '../publicFormGuard';
 import type { FullQuoteData } from '../types';
+import { ShareQuoteButton } from './ShareQuoteButton';
+import { buildSharePayload } from '../shareQuote';
 
 interface Props {
   data: FullQuoteData;
@@ -12,6 +16,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { contactPref, setContactPref, extras } = usePublicFormGuard();
 
   const { quote, roofData, address } = data;
 
@@ -43,6 +48,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           roofSquares: quote.roofSquares,
           avgPitchDegrees: quote.avgPitchDegrees,
           pitchOver12: quote.pitchOver12,
+          ...extras,
         }),
       });
 
@@ -66,7 +72,9 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         <p className="quote-result__address">📍 {address}</p>
 
         <div className="quote-result__price">
-          {formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}
+          <span>{formatPrice(quote.lowEstimate)}</span>
+          <span aria-hidden="true">–</span>
+          <span>{formatPrice(quote.highEstimate)}</span>
         </div>
         <p className="quote-result__price-label">Estimated roof replacement cost</p>
 
@@ -90,6 +98,16 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         </div>
       </div>
 
+      <ShareQuoteButton
+        payload={buildSharePayload({
+          address,
+          lowLabel: formatPrice(quote.lowEstimate),
+          highLabel: formatPrice(quote.highEstimate),
+          detail: `${roofData.totalAreaSqFt.toLocaleString()} sq ft · ${quote.roofSquares} squares · ${quote.pitchOver12}/12 pitch`,
+          pageUrl: window.location.href,
+        })}
+      />
+
       <div className="divider" />
 
       <div className="lead-section__title">Want an exact quote?</div>
@@ -100,6 +118,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
       {error && <div className="error-msg">{error}</div>}
 
       <form onSubmit={handleSubmit}>
+        <HoneypotField id="contact-pref-lead" value={contactPref} onChange={setContactPref} />
         <div className="form-group">
           <label htmlFor="name">Full Name</label>
           <input
@@ -132,7 +151,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
             id="phone"
             type="tel"
             className="input"
-            placeholder="(919) 555-1234"
+            placeholder="Mobile number"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             disabled={loading}

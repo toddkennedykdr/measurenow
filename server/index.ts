@@ -20,8 +20,8 @@ import { initDb, pingDatabase } from './db';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Railway terminates TLS and forwards the client IP. Trust that one hop
-// so per-IP rate limits see the visitor, not the proxy.
+// One proxy hop for req.ip. The lead limiter does not use X-Forwarded-For
+// unless the TCP peer is a loopback or private address. See leadRateLimit.ts.
 app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
