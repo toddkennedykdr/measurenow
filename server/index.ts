@@ -25,7 +25,40 @@ const PORT = process.env.PORT || 3001;
 // real client IP (used by the rate limiters). Never `true` (that would trust spoofed XFF).
 app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
 
-app.use(helmet({ contentSecurityPolicy: false }));
+// Helmet's default frameguard sends X-Frame-Options: SAMEORIGIN on every response,
+// which blocks https://kanddroofingnc.com from embedding the public quote page.
+// Only that document is embeddable. Its scripts and styles are same-origin
+// subresources of the framed page, so they keep the default framing headers.
+// CSP is frame-ancestors only: a full Helmet CSP would change script and style
+// loading. Helmet still requires a default-src key, so it is explicitly disabled.
+const QUOTE_FRAME_ANCESTORS = [
+  "'self'",
+  'https://kanddroofingnc.com',
+  'https://www.kanddroofingnc.com',
+];
+const defaultHelmet = helmet({ contentSecurityPolicy: false });
+const quoteEmbedHelmet = helmet({
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      'default-src': helmet.contentSecurityPolicy.dangerouslyDisableDefaultSrc,
+      'frame-ancestors': QUOTE_FRAME_ANCESTORS,
+    },
+  },
+  frameguard: false,
+});
+
+function isQuoteDocument(urlPath: string): boolean {
+  return urlPath === '/quote' || urlPath === '/quote/';
+}
+
+app.use((req, res, next) => {
+  if (isQuoteDocument(req.path)) {
+    quoteEmbedHelmet(req, res, next);
+    return;
+  }
+  defaultHelmet(req, res, next);
+});
 // CORS: only our own origins (prod Railway domain, ALLOWED_ORIGINS, localhost in dev).
 app.use(cors(corsOptionsDelegate));
 app.use(express.json({ limit: '10mb' }));

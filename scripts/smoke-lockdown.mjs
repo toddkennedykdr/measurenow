@@ -81,6 +81,30 @@ try {
 
   // 7. No real outbound calls
   check('no non-stubbed outbound calls', !/ECONNREFUSED|ENOTFOUND/.test(log));
+
+  // 8. Public quote document may be framed by the K&D marketing site.
+  // Other responses keep Helmet's X-Frame-Options: SAMEORIGIN and no CSP.
+  const FRAME_ANCESTORS = "frame-ancestors 'self' https://kanddroofingnc.com https://www.kanddroofingnc.com";
+  for (const p of ['/quote', '/quote/', '/quote?address=1%20Main']) {
+    r = await req(p);
+    const csp = r.headers.get('content-security-policy');
+    const xfo = r.headers.get('x-frame-options');
+    check(
+      `GET ${p} allows K&D framing`,
+      r.status === 200 && xfo === null && csp === FRAME_ANCESTORS && (r.headers.get('x-content-type-options') || '') === 'nosniff',
+      `status=${r.status} xfo=${xfo} csp=${csp}`,
+    );
+  }
+  for (const p of ['/', '/login', '/api/roof/maps-key']) {
+    r = await req(p);
+    const csp = r.headers.get('content-security-policy');
+    const xfo = r.headers.get('x-frame-options');
+    check(
+      `GET ${p} stays SAMEORIGIN with no CSP`,
+      xfo === 'SAMEORIGIN' && csp === null,
+      `status=${r.status} xfo=${xfo} csp=${csp}`,
+    );
+  }
 } catch (e) {
   fail++; console.error('ERROR', e);
 } finally {
