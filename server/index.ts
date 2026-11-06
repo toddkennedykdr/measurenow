@@ -31,6 +31,9 @@ app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
 // subresources of the framed page, so they keep the default framing headers.
 // CSP is frame-ancestors only: a full Helmet CSP would change script and style
 // loading. Helmet still requires a default-src key, so it is explicitly disabled.
+// CORP is cross-origin on that document only. The marketing site's no-cors
+// probe of the iframe URL fails when Helmet's default same-origin CORP is set,
+// even after the page is embeddable. Other routes keep same-origin.
 const QUOTE_FRAME_ANCESTORS = [
   "'self'",
   'https://kanddroofingnc.com',
@@ -46,6 +49,7 @@ const quoteEmbedHelmet = helmet({
     },
   },
   frameguard: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
 });
 
 function isQuoteDocument(urlPath: string): boolean {
