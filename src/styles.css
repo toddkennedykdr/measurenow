@@ -409,7 +409,27 @@ body {
   font-size: 13px;
   color: var(--gray-500);
   margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.quote-result__disclaimer {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--gray-500);
+  margin: 0 0 12px;
+}
+
+.quote-result__call {
+  display: inline-block;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--blue-dark);
+  text-decoration: none;
   margin-bottom: 24px;
+}
+
+.quote-result__call:hover {
+  text-decoration: underline;
 }
 
 .quote-stats {

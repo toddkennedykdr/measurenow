@@ -1,12 +1,19 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { BrandLogo } from './BrandLogo';
+import { isFramedWindow, quotePageChrome } from '../quoteChrome';
 
 export function NavBar() {
   const location = useLocation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const path = location.pathname;
+  const { hideStaffLinks } = quotePageChrome({
+    pathname: path,
+    search: location.search,
+    framed: isFramedWindow(),
+    loggedIn: !!user,
+  });
 
   const handleLogout = async () => {
     await logout();
@@ -23,7 +30,7 @@ export function NavBar() {
         <BrandLogo size="header" />
       </Link>
       <div className="appbar__links">
-        {user ? (
+        {user && !hideStaffLinks ? (
           <>
             {item('/', 'Dashboard', path === '/')}
             {item('/quote', 'Quote', path === '/quote')}
@@ -35,15 +42,15 @@ export function NavBar() {
         ) : (
           <>
             {item('/', 'Instant Quote', path === '/' || path === '/quote')}
-            {item('/inspect', 'Inspection Tool', path === '/inspect')}
+            {!hideStaffLinks && item('/inspect', 'Inspection Tool', path === '/inspect')}
           </>
         )}
-        {user ? (
+        {user && !hideStaffLinks ? (
           <button type="button" className="appbar__link" onClick={handleLogout}>
             Logout ({user.name})
           </button>
         ) : (
-          item('/login', 'Login', path === '/login')
+          !hideStaffLinks && item('/login', 'Login', path === '/login')
         )}
       </div>
     </nav>

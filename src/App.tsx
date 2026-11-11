@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { NavBar } from './components/NavBar';
 import { BrandLogo } from './components/BrandLogo';
+import { isFramedWindow, notifyParentLeadSubmitted, quotePageChrome } from './quoteChrome';
 import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
@@ -8,6 +10,13 @@ import { QuoteResult } from './components/QuoteResult';
 import { ThankYou } from './components/ThankYou';
 
 export default function App() {
+  const location = useLocation();
+  const { hideHeader } = quotePageChrome({
+    pathname: location.pathname,
+    search: location.search,
+    framed: isFramedWindow(),
+    loggedIn: false,
+  });
   const [step, setStep] = useState<Step>('address');
   const [geocodeData, setGeocodeData] = useState<GeocodeResponse | null>(null);
   const [quoteData, setQuoteData] = useState<FullQuoteData | null>(null);
@@ -38,6 +47,7 @@ export default function App() {
   };
 
   const handleLeadSubmitted = (name: string) => {
+    notifyParentLeadSubmitted();
     setLeadName(name);
     setStep('thankyou');
   };
@@ -53,10 +63,12 @@ export default function App() {
     <>
     <NavBar />
     <div className="widget">
-      <header className="header">
-        <BrandLogo size="login" />
-        <div className="header__tagline">Serving North Carolina since 2018</div>
-      </header>
+      {!hideHeader && (
+        <header className="header">
+          <BrandLogo size="login" />
+          <div className="header__tagline">Serving North Carolina since 2018</div>
+        </header>
+      )}
 
       {step === 'address' && (
         <AddressForm onGeocoded={handleGeocoded} />

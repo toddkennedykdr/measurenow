@@ -12,7 +12,7 @@ export interface RoofQuote {
   materialNote: string;
 }
 
-// K&D Pricing: $350-$450 per square installed (architectural shingles)
+// K&D Pricing: $450-$555 per square installed (architectural shingles)
 const PRICE_PER_SQUARE_LOW = 450;
 const PRICE_PER_SQUARE_HIGH = 555;
 const WASTE_FACTOR = 1.15; // 15% waste

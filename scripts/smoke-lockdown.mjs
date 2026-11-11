@@ -1,7 +1,7 @@
 // Smoke test for the lockdown patch. Boots the BUILT server (dist-server) locally with
 // SKIP_DB_INIT=1 and a fetch stub (no real Google/Claude/Resend/JobNimbus calls).
 // Usage: npm run build && node scripts/smoke-lockdown.mjs
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -82,21 +82,50 @@ try {
   // 7. No real outbound calls
   check('no non-stubbed outbound calls', !/ECONNREFUSED|ENOTFOUND/.test(log));
 
+  // Rendered quote page: staff links, embed header, call link, disclaimer, lead postMessage.
+  const ui = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/check-quote-ui.tsx')], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  const uiLines = `${ui.stdout || ''}${ui.stderr || ''}`.split('\n').map(line => line.trim()).filter(Boolean);
+  let uiChecks = 0;
+  for (const line of uiLines) {
+    if (line.startsWith('PASS ') || line.startsWith('FAIL ')) {
+      uiChecks++;
+      if (line.startsWith('PASS ')) pass++;
+      else fail++;
+      console.log(line);
+    }
+  }
+  if (ui.status !== 0 && uiChecks === 0) {
+    check('quote ui script ran', false, (ui.stderr || ui.stdout || `exit ${ui.status}`).slice(0, 500));
+  }
+
   // 8. Public quote document may be framed by the K&D marketing site.
   // CORP is cross-origin there so a cross-origin no-cors fetch of the document
   // succeeds. Other responses keep SAMEORIGIN, no CSP, and CORP same-origin.
   const FRAME_ANCESTORS = "frame-ancestors 'self' https://kanddroofingnc.com https://www.kanddroofingnc.com";
-  for (const p of ['/quote', '/quote/', '/quote?address=1%20Main']) {
+  const quoteHeaderPaths = ['/quote', '/quote/', '/quote?address=1%20Main', '/quote?embed=1'];
+  const quoteHeaders = [];
+  for (const p of quoteHeaderPaths) {
     r = await req(p);
     const csp = r.headers.get('content-security-policy');
     const xfo = r.headers.get('x-frame-options');
     const corp = r.headers.get('cross-origin-resource-policy');
+    quoteHeaders.push({ csp, xfo, corp });
     check(
       `GET ${p} allows K&D framing`,
       r.status === 200 && xfo === null && csp === FRAME_ANCESTORS && corp === 'cross-origin' && (r.headers.get('x-content-type-options') || '') === 'nosniff',
       `status=${r.status} xfo=${xfo} csp=${csp} corp=${corp}`,
     );
   }
+  const embedHeaders = quoteHeaders[quoteHeaders.length - 1];
+  const plainHeaders = quoteHeaders[0];
+  check(
+    'GET /quote?embed=1 headers match /quote',
+    embedHeaders.csp === plainHeaders.csp && embedHeaders.xfo === plainHeaders.xfo && embedHeaders.corp === plainHeaders.corp,
+    `quote=${JSON.stringify(plainHeaders)} embed=${JSON.stringify(embedHeaders)}`,
+  );
   for (const p of ['/', '/login', '/api/roof/maps-key']) {
     r = await req(p);
     const csp = r.headers.get('content-security-policy');

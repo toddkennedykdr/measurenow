@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import type { FullQuoteData } from '../types';
+import { KD_CALL, QUOTE_DISCLAIMER } from '../quoteChrome';
 
 interface Props {
   data: FullQuoteData;
@@ -69,6 +70,8 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           {formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}
         </div>
         <p className="quote-result__price-label">Estimated roof replacement cost</p>
+        <p className="quote-result__disclaimer">{QUOTE_DISCLAIMER}</p>
+        <a className="quote-result__call" href={KD_CALL.href}>{KD_CALL.label}</a>
 
         <div className="quote-stats">
           <div className="quote-stat">
