@@ -39,7 +39,7 @@ export function ThankYou({ name, data, onStartOver }: Props) {
             <li>We'll call or text you to schedule a free inspection</li>
             <li>Our inspector visits your property (30 min)</li>
             <li>You receive a detailed written estimate within 24 hours</li>
-            <li>No pressure — your quote is good for 30 days</li>
+            <li>Thanks! K&amp;D Roofing will reach out soon to schedule your free on-site inspection.</li>
           </ul>
         </div>
       </div>

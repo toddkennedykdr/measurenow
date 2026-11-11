@@ -13,12 +13,13 @@ import {
   LEAD_SUBMITTED_MESSAGE,
   LEAD_PARENT_ORIGINS,
   isFramedWindow,
+  notifyParentHeight,
   notifyParentLeadSubmitted,
   quotePageChrome,
 } from '../src/quoteChrome';
 import { calculateQuote, HDZ_PRICE_PER_SQUARE, UHDZ_PRICE_PER_SQUARE, UHDZ_UPGRADE_PER_SQUARE } from '../server/services/pricing';
 import type { BuildingRoofData } from '../server/services/solar';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,9 +44,11 @@ const home = render('/', <NavBar />);
 const inspect = render('/inspect', <NavBar />);
 
 check('unframed /quote has the header', unframed.includes(TAGLINE));
+check('unframed /quote keeps the nav', unframed.includes('class="appbar"'));
 check('unframed /quote hides Inspection Tool', !unframed.includes('Inspection Tool'));
 check('unframed /quote hides Login', !unframed.includes('>Login<'));
 check('embed /quote hides the header', !embed.includes(TAGLINE) && !embed.includes('class="header"'));
+check('embed /quote hides the nav', !embed.includes('class="appbar"') && !embed.includes('Instant Quote'));
 check('embed /quote hides Inspection Tool', !embed.includes('Inspection Tool'));
 check('embed /quote hides Login', !embed.includes('>Login<'));
 check('home nav still has Inspection Tool', home.includes('Inspection Tool'));
@@ -63,6 +66,7 @@ try {
   else (globalThis as unknown as { window?: unknown }).window = previousWindow;
 }
 check('framed /quote hides the header', framedHtml.length > 0 && !framedHtml.includes(TAGLINE) && !framedHtml.includes('class="header"'));
+check('framed /quote hides the nav', !framedHtml.includes('class="appbar"') && !framedHtml.includes('Instant Quote'));
 check('framed /quote hides Inspection Tool', !framedHtml.includes('Inspection Tool'));
 check('framed /quote hides Login', !framedHtml.includes('>Login<'));
 
@@ -132,7 +136,41 @@ calls.length = 0;
 check('top-level window is not framed', !isFramedWindow());
 notifyParentLeadSubmitted();
 check('top-level lead capture does not postMessage', calls.length === 0);
+calls.length = 0;
+notifyParentHeight(640);
+check('top-level page does not post a height', calls.length === 0);
+(globalThis as unknown as { window: { top: unknown } }).window.top = {};
+notifyParentHeight(812);
+check('height message posts once per parent origin', calls.length === 2, JSON.stringify(calls));
+check(
+  'height message uses both K&D Roofing origins and never *',
+  calls[0]?.origin === LEAD_PARENT_ORIGINS[0]
+    && calls[1]?.origin === LEAD_PARENT_ORIGINS[1]
+    && calls.every(c => c.origin !== '*' && JSON.stringify(c.data) === JSON.stringify({ type: 'measurenow:height', height: 812 })),
+);
 delete (globalThis as unknown as { window?: unknown }).window;
+
+function sourceFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) found.push(...sourceFiles(full));
+    else if (/\.(tsx|ts|css|html)$/.test(name)) found.push(full);
+  }
+  return found;
+}
+const customerSource = sourceFiles(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src'))
+  .map(file => readFileSync(file, 'utf8'))
+  .join('\n');
+check('customer copy has no "no pressure"', !/no pressure/i.test(customerSource));
+const withoutFullName = customerSource.replace(/K&amp;D Roofing/g, '').replace(/K&D Roofing/g, '');
+check('customer copy does not use a bare K&D', !/K&(?:amp;)?D/.test(withoutFullName));
+
+const styles = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles.css'), 'utf8');
+const disclaimerRule = styles.slice(styles.indexOf('.quote-result__disclaimer'), styles.indexOf('.quote-result__upgrade'));
+const callRule = styles.slice(styles.indexOf('.quote-result__call {'), styles.indexOf('.quote-result__call:hover'));
+check('disclaimer font is 14px', disclaimerRule.includes('font-size: 14px;'));
+check('call link tap target is at least 48px', callRule.includes('min-height: 48px;'));
 
 const pricing = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../server/services/pricing.ts'), 'utf8');
 check('pricing comment names HDZ $430 and UHDZ $470', pricing.includes('$430') && pricing.includes('$470') && !pricing.includes('$350') && !pricing.includes('$555'));

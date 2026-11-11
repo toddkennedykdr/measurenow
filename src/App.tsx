@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { NavBar } from './components/NavBar';
 import { BrandLogo } from './components/BrandLogo';
-import { isFramedWindow, notifyParentLeadSubmitted, quotePageChrome } from './quoteChrome';
+import { isFramedWindow, notifyParentHeight, notifyParentLeadSubmitted, quotePageChrome } from './quoteChrome';
 import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
@@ -59,9 +59,23 @@ export default function App() {
     setLeadName('');
   };
 
+  useEffect(() => {
+    if (!isFramedWindow()) return;
+    const root = document.documentElement;
+    const post = () => notifyParentHeight(root.scrollHeight);
+    post();
+    const observer = new ResizeObserver(post);
+    observer.observe(root);
+    window.addEventListener('resize', post);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', post);
+    };
+  }, [step]);
+
   return (
     <>
-    <NavBar />
+    {!hideHeader && <NavBar />}
     <div className="widget">
       {!hideHeader && (
         <header className="header">

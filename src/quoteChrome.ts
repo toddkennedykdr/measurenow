@@ -51,3 +51,14 @@ export function notifyParentLeadSubmitted(): void {
     window.parent.postMessage(LEAD_SUBMITTED_MESSAGE, origin);
   }
 }
+
+export const HEIGHT_MESSAGE_TYPE = 'measurenow:height' as const;
+
+/** Tell a framing parent how tall this document is. No-op when this page is top-level. */
+export function notifyParentHeight(height: number): void {
+  if (!isFramedWindow()) return;
+  const message = { type: HEIGHT_MESSAGE_TYPE, height };
+  for (const origin of LEAD_PARENT_ORIGINS) {
+    window.parent.postMessage(message, origin);
+  }
+}
