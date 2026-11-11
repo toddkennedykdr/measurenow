@@ -5,7 +5,7 @@ const SOURCES: Record<LogoSize, { webp: string; png: string }> = {
   login: { webp: '/brand/logo-login.webp', png: '/brand/logo-login.png' },
 };
 
-/** Official K&D mark. One dimension is set in CSS so the artwork is never stretched. */
+/** Official K&D Roofing mark. One dimension is set in CSS so the artwork is never stretched. */
 export function BrandLogo({ size = 'header' }: { size?: LogoSize }) {
   const src = SOURCES[size];
   return (

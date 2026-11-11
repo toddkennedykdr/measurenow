@@ -1,4 +1,4 @@
-/** Status colors from the K&D sheet. White text on these solids stays above WCAG AA. */
+/** Status colors from the K&D Roofing sheet. White text on these solids stays above WCAG AA. */
 export function severityColor(s: string) {
   if (s === 'major') return '#c62828';
   if (s === 'minor') return '#7a5300';

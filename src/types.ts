@@ -17,6 +17,11 @@ export interface QuoteResponse {
     roofSquares: number;
     totalAreaSqFt: number;
     wasteFactor: number;
+    hdzEstimate: number;
+    uhdzEstimate: number;
+    hdzPricePerSquare: number;
+    uhdzUpgradePerSquare: number;
+    uhdzPricePerSquare: number;
     lowEstimate: number;
     highEstimate: number;
     avgPitchDegrees: number;

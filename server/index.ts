@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -17,6 +18,11 @@ dotenv.config();
 
 import { initDb } from './db';
 import { corsOptionsDelegate, blockForeignOrigins } from './middleware/security';
+import {
+  HARDCODED_EMBED_ORIGINS,
+  embedOriginsScript,
+  parseEmbedParentOrigins,
+} from './embedOrigins';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -25,7 +31,44 @@ const PORT = process.env.PORT || 3001;
 // real client IP (used by the rate limiters). Never `true` (that would trust spoofed XFF).
 app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
 
-app.use(helmet({ contentSecurityPolicy: false }));
+// Helmet's default frameguard sends X-Frame-Options: SAMEORIGIN on every response,
+// which blocks https://kanddroofingnc.com from embedding the public quote page.
+// Only that document is embeddable. Its scripts and styles are same-origin
+// subresources of the framed page, so they keep the default framing headers.
+// CSP is frame-ancestors only: a full Helmet CSP would change script and style
+// loading. Helmet still requires a default-src key, so it is explicitly disabled.
+// CORP is cross-origin on that document only. The marketing site's no-cors
+// probe of the iframe URL fails when Helmet's default same-origin CORP is set,
+// even after the page is embeddable. Other routes keep same-origin.
+const embedOrigins = parseEmbedParentOrigins(process.env.EMBED_PARENT_ORIGINS, message => {
+  console.warn(message);
+});
+const QUOTE_FRAME_ANCESTORS = ["'self'", ...embedOrigins];
+const extraEmbedOrigins = embedOrigins.length > HARDCODED_EMBED_ORIGINS.length;
+const defaultHelmet = helmet({ contentSecurityPolicy: false });
+const quoteEmbedHelmet = helmet({
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      'default-src': helmet.contentSecurityPolicy.dangerouslyDisableDefaultSrc,
+      'frame-ancestors': QUOTE_FRAME_ANCESTORS,
+    },
+  },
+  frameguard: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+});
+
+function isQuoteDocument(urlPath: string): boolean {
+  return urlPath === '/quote' || urlPath === '/quote/';
+}
+
+app.use((req, res, next) => {
+  if (isQuoteDocument(req.path)) {
+    quoteEmbedHelmet(req, res, next);
+    return;
+  }
+  defaultHelmet(req, res, next);
+});
 // CORS: only our own origins (prod Railway domain, ALLOWED_ORIGINS, localhost in dev).
 app.use(cors(corsOptionsDelegate));
 app.use(express.json({ limit: '10mb' }));
@@ -70,9 +113,21 @@ app.use('/api', (_req, res) => {
 
 // Serve static frontend in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '..', 'dist')));
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  const distDir = path.join(__dirname, '..', 'dist');
+  const indexFile = path.join(distDir, 'index.html');
+  let quoteHtml: string | null = null;
+  app.use(express.static(distDir));
+  app.get('*', (req, res) => {
+    if (extraEmbedOrigins && isQuoteDocument(req.path)) {
+      if (quoteHtml == null) {
+        const shell = fs.readFileSync(indexFile, 'utf8');
+        const tag = embedOriginsScript(embedOrigins);
+        quoteHtml = shell.includes('<head>') ? shell.replace('<head>', () => `<head>${tag}`) : `${tag}${shell}`;
+      }
+      res.type('html').send(quoteHtml);
+      return;
+    }
+    res.sendFile(indexFile);
   });
 }
 

@@ -409,7 +409,38 @@ body {
   font-size: 13px;
   color: var(--gray-500);
   margin-top: 4px;
-  margin-bottom: 24px;
+  margin-bottom: 8px;
+}
+
+.quote-result__disclaimer {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--gray-500);
+  margin: 0 0 8px;
+}
+
+.quote-result__upgrade {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--navy);
+  margin: 0 0 12px;
+}
+
+.quote-result__call {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 12px 2px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--blue-dark);
+  text-decoration: none;
+  margin-bottom: 12px;
+}
+
+.quote-result__call:hover {
+  text-decoration: underline;
 }
 
 .quote-stats {
