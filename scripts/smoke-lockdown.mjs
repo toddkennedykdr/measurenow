@@ -135,7 +135,7 @@ try {
   const previewEnv = {
     ...env,
     PORT: String(previewPort),
-    EMBED_PARENT_ORIGINS: 'https://preview.example.com, *, http://x.com, https://x.com/path, https://*.x.com, "><script>, ',
+    EMBED_PARENT_ORIGINS: 'https://preview.example.com, *, http://x.com, https://x.com/path, https://*.x.com, "><script>, https://a;b.test, https://a$\'.test, https://good.test:8443, https://x.test:99999, https://GOOD.TEST',
   };
   const preview = spawn(process.execPath, ['-r', path.join(root, 'scripts/fetch-stub.cjs'), path.join(root, 'dist-server/index.js')], { env: previewEnv, cwd: root });
   let previewLog = '';
@@ -148,21 +148,24 @@ try {
     const previewQuote = await fetch(previewBase + '/quote');
     const previewCsp = previewQuote.headers.get('content-security-policy');
     const previewBody = await previewQuote.text();
-    const expectedCsp = `${FRAME_ANCESTORS} https://preview.example.com`;
+    const expectedCsp = `${FRAME_ANCESTORS} https://preview.example.com https://good.test:8443 https://good.test`;
     check('preview origin is appended to frame-ancestors', previewQuote.status === 200 && previewCsp === expectedCsp && previewQuote.headers.get('x-frame-options') === null && previewQuote.headers.get('cross-origin-resource-policy') === 'cross-origin', `csp=${previewCsp}`);
     const marker = previewBody.match(/<script type="application\/json" id="measurenow-embed-origins">([\s\S]*?)<\/script>/);
     let listed = null;
     try { listed = marker ? JSON.parse(marker[1]) : null; } catch { listed = null; }
     check(
       'quote HTML gives the client the same parent list',
-      JSON.stringify(listed) === JSON.stringify(['https://kanddroofingnc.com', 'https://www.kanddroofingnc.com', 'https://preview.example.com']),
+      JSON.stringify(listed) === JSON.stringify(['https://kanddroofingnc.com', 'https://www.kanddroofingnc.com', 'https://preview.example.com', 'https://good.test:8443', 'https://good.test']),
       `listed=${JSON.stringify(listed)}`,
     );
     check(
       'rejected embed values do not become markup or log text',
       !previewBody.includes('"><script>') && !previewBody.includes('http://x.com') && !previewBody.includes('*.x.com')
-        && previewLog.includes('EMBED_PARENT_ORIGINS: ignored 5 invalid entries')
-        && !previewLog.includes('"><script>') && !previewLog.includes('http://x.com') && !previewLog.includes('*.x.com'),
+        && !previewBody.includes('a;b.test') && !previewBody.includes("a$'")
+        && (previewBody.match(/id="root"/g) || []).length === 1
+        && previewLog.includes('EMBED_PARENT_ORIGINS: ignored 8 invalid entries')
+        && !previewLog.includes('"><script>') && !previewLog.includes('http://x.com') && !previewLog.includes('*.x.com')
+        && !previewLog.includes('a;b.test') && !previewLog.includes("a$'"),
     );
     const previewHome = await fetch(previewBase + '/');
     check('preview env leaves other pages SAMEORIGIN', previewHome.headers.get('x-frame-options') === 'SAMEORIGIN' && previewHome.headers.get('content-security-policy') === null);

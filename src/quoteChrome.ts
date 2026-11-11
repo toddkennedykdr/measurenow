@@ -56,6 +56,24 @@ export function notifyParentLeadSubmitted(): void {
 }
 
 export const HEIGHT_MESSAGE_TYPE = 'measurenow:height' as const;
+export const PING_MESSAGE_TYPE = 'measurenow:ping' as const;
+
+/**
+ * A framing parent can ask for the height again after it hydrates.
+ * Reply only to that parent, and only with the height message.
+ */
+export function replyToParentPing(
+  event: { origin: string; source: unknown; data: unknown },
+  height: number,
+  parent: { postMessage: (message: unknown, targetOrigin: string) => void } | null,
+): boolean {
+  if (!parent || event.source !== parent) return false;
+  const data = event.data;
+  if (!data || typeof data !== 'object' || (data as { type?: unknown }).type !== PING_MESSAGE_TYPE) return false;
+  if (!parentTargets().includes(event.origin)) return false;
+  parent.postMessage({ type: HEIGHT_MESSAGE_TYPE, height }, event.origin);
+  return true;
+}
 
 /** Tell a framing parent how tall this document is. No-op when this page is top-level. */
 export function notifyParentHeight(height: number): void {

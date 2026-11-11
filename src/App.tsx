@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { NavBar } from './components/NavBar';
 import { BrandLogo } from './components/BrandLogo';
-import { isFramedWindow, notifyParentHeight, notifyParentLeadSubmitted, quotePageChrome } from './quoteChrome';
+import { isFramedWindow, notifyParentHeight, notifyParentLeadSubmitted, quotePageChrome, replyToParentPing } from './quoteChrome';
 import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
@@ -63,13 +63,18 @@ export default function App() {
     if (!isFramedWindow()) return;
     const root = document.documentElement;
     const post = () => notifyParentHeight(root.scrollHeight);
+    const onPing = (event: MessageEvent) => {
+      replyToParentPing(event, root.scrollHeight, window.parent);
+    };
     post();
     const observer = new ResizeObserver(post);
     observer.observe(root);
     window.addEventListener('resize', post);
+    window.addEventListener('message', onPing);
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', post);
+      window.removeEventListener('message', onPing);
     };
   }, [step]);
 

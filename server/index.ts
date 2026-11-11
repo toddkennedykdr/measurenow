@@ -122,7 +122,7 @@ if (process.env.NODE_ENV === 'production') {
       if (quoteHtml == null) {
         const shell = fs.readFileSync(indexFile, 'utf8');
         const tag = embedOriginsScript(embedOrigins);
-        quoteHtml = shell.includes('<head>') ? shell.replace('<head>', `<head>${tag}`) : `${tag}${shell}`;
+        quoteHtml = shell.includes('<head>') ? shell.replace('<head>', () => `<head>${tag}`) : `${tag}${shell}`;
       }
       res.type('html').send(quoteHtml);
       return;

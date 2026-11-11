@@ -6,22 +6,37 @@ export const HARDCODED_EMBED_ORIGINS = [
 
 export const EMBED_ORIGINS_ELEMENT_ID = 'measurenow-embed-origins';
 
-/** An origin is https, a host, and an optional port. Nothing else. */
-export function isExactHttpsOrigin(value: string): boolean {
-  if (typeof value !== 'string' || value.length === 0 || /[\s*]/.test(value)) return false;
-  if (!value.startsWith('https://')) return false;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
+/**
+ * Canonical https://host[:port], or null.
+ * The host is lowercased and may contain only letters, digits, dots, and hyphens.
+ * A label cannot be empty or start or end with a hyphen. The port, if present, is 1–65535.
+ */
+export function canonicalizeEmbedOrigin(value: string): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('https://')) return null;
+  const rest = trimmed.slice('https://'.length);
+  if (!rest || /[\s/?#@*]/.test(rest)) return null;
+  const colon = rest.lastIndexOf(':');
+  let host = rest;
+  let port = '';
+  if (colon !== -1) {
+    host = rest.slice(0, colon);
+    port = rest.slice(colon + 1);
+    if (!/^[0-9]+$/.test(port) || (port.length > 1 && port.startsWith('0'))) return null;
+    const portNumber = Number(port);
+    if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) return null;
   }
-  if (url.protocol !== 'https:') return false;
-  if (url.username || url.password) return false;
-  if (url.search || url.hash) return false;
-  if (url.pathname !== '/') return false;
-  if (!url.hostname || url.hostname.includes('*')) return false;
-  return value === url.origin;
+  host = host.toLowerCase();
+  if (!/^[a-z0-9.-]+$/.test(host)) return null;
+  const labels = host.split('.');
+  if (labels.some(label => label.length === 0 || label.startsWith('-') || label.endsWith('-'))) return null;
+  return port ? `https://${host}:${port}` : `https://${host}`;
+}
+
+/** True only for an origin that is already in canonical form. */
+export function isExactHttpsOrigin(value: string): boolean {
+  return canonicalizeEmbedOrigin(value) === value;
 }
 
 export function embedOriginWarning(invalidCount: number): string {
@@ -48,7 +63,8 @@ export function parseEmbedParentOrigins(
   for (const part of raw.split(',')) {
     const entry = part.trim();
     if (!entry) continue;
-    if (isExactHttpsOrigin(entry)) extras.push(entry);
+    const canonical = canonicalizeEmbedOrigin(entry);
+    if (canonical) extras.push(canonical);
     else invalid += 1;
   }
   if (invalid > 0) warn(embedOriginWarning(invalid));

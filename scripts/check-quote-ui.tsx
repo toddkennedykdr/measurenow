@@ -16,10 +16,12 @@ import {
   notifyParentHeight,
   notifyParentLeadSubmitted,
   quotePageChrome,
+  replyToParentPing,
 } from '../src/quoteChrome';
 import { calculateQuote, HDZ_PRICE_PER_SQUARE, UHDZ_PRICE_PER_SQUARE, UHDZ_UPGRADE_PER_SQUARE } from '../server/services/pricing';
 import {
   HARDCODED_EMBED_ORIGINS,
+  canonicalizeEmbedOrigin,
   embedOriginsScript,
   htmlSafeJson,
   isExactHttpsOrigin,
@@ -224,9 +226,16 @@ check(
   'invalid embed origins are counted without echoing them',
   warnings.length === 1 && warnings[0] === 'EMBED_PARENT_ORIGINS: ignored 5 invalid entries' && !warnings[0].includes('*') && !warnings[0].includes('http') && !warnings[0].includes('script'),
 );
-for (const bad of ['*', 'http://x.com', 'https://x.com/path', 'https://*.x.com', '"><script>', 'https://x.com/', 'https://x.com?q=1']) {
-  check(`rejected embed origin ${bad}`, !isExactHttpsOrigin(bad));
+for (const bad of ['*', 'http://x.com', 'https://x.com/path', 'https://*.x.com', '"><script>', 'https://x.com/', 'https://x.com?q=1', 'https://a;b.test', "https://a$'.test", 'https://x.test:99999']) {
+  check(`rejected embed origin ${bad}`, canonicalizeEmbedOrigin(bad) === null && !isExactHttpsOrigin(bad));
 }
+check('port 8443 is an accepted embed origin', canonicalizeEmbedOrigin('https://good.test:8443') === 'https://good.test:8443' && isExactHttpsOrigin('https://good.test:8443'));
+check('uppercase embed host is lowercased', canonicalizeEmbedOrigin('https://GOOD.TEST') === 'https://good.test' && !isExactHttpsOrigin('https://GOOD.TEST') && isExactHttpsOrigin('https://good.test'));
+const tightened = parseEmbedParentOrigins("https://a;b.test, https://a$'.test, https://good.test:8443, https://x.test:99999, https://GOOD.TEST");
+check(
+  'tightened hosts keep only the canonical origins',
+  JSON.stringify(tightened) === JSON.stringify([...hardcoded, 'https://good.test:8443', 'https://good.test']),
+);
 check('hardcoded origins are not duplicated', parseEmbedParentOrigins(` ${hardcoded[0]} , ${preview} `).length === 3);
 const nasty = htmlSafeJson(['</script><script>alert(1)</script>', 'a&b', 'line\u2028sep\u2029']);
 check('embed JSON cannot break out of the script tag', !nasty.includes('<') && !nasty.includes('>') && !nasty.includes('&') && !nasty.includes('\u2028') && !nasty.includes('\u2029'));
@@ -251,5 +260,36 @@ check(
 check('client falls back when the payload is not JSON', JSON.stringify(readEmbedParentOrigins({
   getElementById() { return { textContent: '{"not":"a list"' }; },
 })) === JSON.stringify(hardcoded));
+
+const pingParent = {
+  postMessage(data: unknown, origin: string) {
+    calls.push({ data, origin });
+  },
+};
+const stranger = {
+  postMessage(data: unknown, origin: string) {
+    calls.push({ data, origin: `stranger:${origin}` });
+  },
+};
+calls.length = 0;
+const trustedPing = replyToParentPing(
+  { origin: hardcoded[0], source: pingParent, data: { type: 'measurenow:ping' } },
+  540,
+  pingParent,
+);
+check('trusted parent ping gets a height reply', trustedPing && calls.length === 1 && JSON.stringify(calls[0]) === JSON.stringify({ data: { type: 'measurenow:height', height: 540 }, origin: hardcoded[0] }));
+check('ping reply is not a lead-submitted message', calls.every(call => JSON.stringify(call.data) !== JSON.stringify({ type: 'measurenow:lead-submitted' })));
+calls.length = 0;
+const untrustedPing = replyToParentPing(
+  { origin: 'https://evil.example', source: pingParent, data: { type: 'measurenow:ping' } },
+  540,
+  pingParent,
+);
+const strangerPing = replyToParentPing(
+  { origin: hardcoded[0], source: stranger, data: { type: 'measurenow:ping' } },
+  540,
+  pingParent,
+);
+check('untrusted origin and non-parent source get no ping reply', !untrustedPing && !strangerPing && calls.length === 0);
 
 if (failed) process.exit(1);
