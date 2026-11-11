@@ -38,8 +38,8 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           email: email.trim(),
           phone: phone.trim(),
           address,
-          quoteLow: quote.lowEstimate,
-          quoteHigh: quote.highEstimate,
+          quoteLow: quote.hdzEstimate,
+          quoteHigh: quote.uhdzEstimate,
           roofSqFt: roofData.totalAreaSqFt,
           roofSquares: quote.roofSquares,
           avgPitchDegrees: quote.avgPitchDegrees,
@@ -67,10 +67,13 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         <p className="quote-result__address">📍 {address}</p>
 
         <div className="quote-result__price">
-          {formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}
+          {formatPrice(quote.hdzEstimate)}
         </div>
-        <p className="quote-result__price-label">Estimated roof replacement cost</p>
+        <p className="quote-result__price-label">GAF Timberline HDZ · ${quote.hdzPricePerSquare}/sq</p>
         <p className="quote-result__disclaimer">{QUOTE_DISCLAIMER}</p>
+        <p className="quote-result__upgrade">
+          {`Optional upgrade: GAF Timberline UHDZ +$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq) · ${formatPrice(quote.uhdzEstimate)}`}
+        </p>
         <a className="quote-result__call" href={KD_CALL.href}>{KD_CALL.label}</a>
 
         <div className="quote-stats">

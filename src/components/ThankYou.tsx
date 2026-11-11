@@ -17,11 +17,12 @@ export function ThankYou({ name, data, onStartOver }: Props) {
         <div className="thank-you__icon">🏠</div>
         <h2 className="thank-you__title">Thanks, {firstName}!</h2>
         <p className="thank-you__text">
-          Your estimated roof replacement cost is{' '}
-          <strong>
-            {formatPrice(data.quote.lowEstimate)} – {formatPrice(data.quote.highEstimate)}
-          </strong>
-          .
+          Your GAF Timberline HDZ estimate is{' '}
+          <strong>{formatPrice(data.quote.hdzEstimate)}</strong>.
+        </p>
+        <p className="thank-you__text">
+          Optional GAF Timberline UHDZ upgrade:{' '}
+          <strong>{formatPrice(data.quote.uhdzEstimate)}</strong>.
         </p>
         <p className="thank-you__text">
           A K&amp;D Roofing specialist will reach out within 24 hours to schedule your free

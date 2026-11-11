@@ -16,6 +16,8 @@ import {
   notifyParentLeadSubmitted,
   quotePageChrome,
 } from '../src/quoteChrome';
+import { calculateQuote, HDZ_PRICE_PER_SQUARE, UHDZ_PRICE_PER_SQUARE, UHDZ_UPGRADE_PER_SQUARE } from '../server/services/pricing';
+import type { BuildingRoofData } from '../server/services/solar';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,8 +80,13 @@ const quote: FullQuoteData = {
     roofSquares: 23,
     totalAreaSqFt: 2000,
     wasteFactor: 1.15,
-    lowEstimate: 10350,
-    highEstimate: 12765,
+    hdzEstimate: 9900,
+    uhdzEstimate: 10800,
+    hdzPricePerSquare: 430,
+    uhdzUpgradePerSquare: 40,
+    uhdzPricePerSquare: 470,
+    lowEstimate: 9900,
+    highEstimate: 10800,
     avgPitchDegrees: 22,
     pitchCategory: 'Standard',
     pitchOver12: 4.8,
@@ -92,6 +99,11 @@ check(
   result.includes('href="tel:+19199774074"') && result.includes('Call K&amp;D Roofing: (919) 977-4074'),
 );
 check('quote result has the disclaimer', result.includes(QUOTE_DISCLAIMER));
+check('quote result shows HDZ as the main price', result.includes('GAF Timberline HDZ') && result.includes('$9,900') && !result.includes('$9,900 –'));
+check(
+  'quote result shows the UHDZ upgrade line',
+  result.includes('Optional upgrade: GAF Timberline UHDZ +$40/sq ($470/sq) · $10,800'),
+);
 check('call constant matches the public link', KD_CALL.href === 'tel:+19199774074' && KD_CALL.label === 'Call K&D Roofing: (919) 977-4074');
 
 const calls: { data: unknown; origin: string }[] = [];
@@ -123,7 +135,31 @@ check('top-level lead capture does not postMessage', calls.length === 0);
 delete (globalThis as unknown as { window?: unknown }).window;
 
 const pricing = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../server/services/pricing.ts'), 'utf8');
-check('pricing comment matches $450-$555', pricing.includes('$450-$555') && !pricing.includes('$350'));
-check('pricing values unchanged', pricing.includes('PRICE_PER_SQUARE_LOW = 450') && pricing.includes('PRICE_PER_SQUARE_HIGH = 555'));
+check('pricing comment names HDZ $430 and UHDZ $470', pricing.includes('$430') && pricing.includes('$470') && !pricing.includes('$350') && !pricing.includes('$555'));
+check(
+  'price constants are the HDZ and UHDZ rates',
+  HDZ_PRICE_PER_SQUARE === 430 && UHDZ_UPGRADE_PER_SQUARE === 40 && UHDZ_PRICE_PER_SQUARE === 470,
+);
+
+function sampleBuilding(area: number, pitch: number): BuildingRoofData {
+  return {
+    totalAreaSqFt: area,
+    segments: [],
+    avgPitch: pitch,
+    imageryQuality: 'HIGH',
+    footprintSqFt: area,
+    estimatedPerimeterFt: 100,
+    estimatedLength: 40,
+    estimatedWidth: 25,
+    boundingBox: null,
+  };
+}
+const standard = calculateQuote(sampleBuilding(2000, 22));
+const atThreshold = calculateQuote(sampleBuilding(2000, 35));
+const steep = calculateQuote(sampleBuilding(2000, 40));
+check('standard roof prices HDZ and UHDZ after 15% waste', standard.hdzEstimate === 9900 && standard.uhdzEstimate === 10800 && standard.lowEstimate === 9900 && standard.highEstimate === 10800, JSON.stringify({ hdz: standard.hdzEstimate, uhdz: standard.uhdzEstimate }));
+check('pitch of 35 degrees does not add the steep surcharge', atThreshold.hdzEstimate === 9900 && atThreshold.uhdzEstimate === 10800);
+check('pitch over 35 degrees adds 10%', steep.hdzEstimate === 10900 && steep.uhdzEstimate === 11900, JSON.stringify({ hdz: steep.hdzEstimate, uhdz: steep.uhdzEstimate }));
+check('waste factor stays 15%', standard.wasteFactor === 1.15);
 
 if (failed) process.exit(1);

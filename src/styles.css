@@ -416,6 +416,13 @@ body {
   font-size: 13px;
   line-height: 1.45;
   color: var(--gray-500);
+  margin: 0 0 8px;
+}
+
+.quote-result__upgrade {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--navy);
   margin: 0 0 12px;
 }
 
