@@ -1,3 +1,5 @@
+import { HARDCODED_EMBED_ORIGINS, readEmbedParentOrigins } from '../server/embedOrigins';
+
 /** Public call link on the quote result. Change the number here only. */
 export const KD_CALL = {
   href: 'tel:+19199774074',
@@ -9,11 +11,12 @@ export const QUOTE_DISCLAIMER =
 
 export const LEAD_SUBMITTED_MESSAGE = { type: 'measurenow:lead-submitted' } as const;
 
-/** Parents allowed to receive the lead-submitted message. Never '*'. */
-export const LEAD_PARENT_ORIGINS = [
-  'https://kanddroofingnc.com',
-  'https://www.kanddroofingnc.com',
-] as const;
+/** Hardcoded parents. A preview host may append to this list at runtime. Never '*'. */
+export const LEAD_PARENT_ORIGINS = HARDCODED_EMBED_ORIGINS;
+
+function parentTargets(): readonly string[] {
+  return readEmbedParentOrigins();
+}
 
 export function isEmbedSearch(search: string): boolean {
   const query = search.startsWith('?') ? search.slice(1) : search;
@@ -47,7 +50,7 @@ export function quotePageChrome(input: {
 /** After a successful lead capture, tell a framing parent. No-op when this page is top-level. */
 export function notifyParentLeadSubmitted(): void {
   if (!isFramedWindow()) return;
-  for (const origin of LEAD_PARENT_ORIGINS) {
+  for (const origin of parentTargets()) {
     window.parent.postMessage(LEAD_SUBMITTED_MESSAGE, origin);
   }
 }
@@ -58,7 +61,7 @@ export const HEIGHT_MESSAGE_TYPE = 'measurenow:height' as const;
 export function notifyParentHeight(height: number): void {
   if (!isFramedWindow()) return;
   const message = { type: HEIGHT_MESSAGE_TYPE, height };
-  for (const origin of LEAD_PARENT_ORIGINS) {
+  for (const origin of parentTargets()) {
     window.parent.postMessage(message, origin);
   }
 }

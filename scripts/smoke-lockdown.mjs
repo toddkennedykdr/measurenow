@@ -14,6 +14,7 @@ const env = {
   NODE_ENV: 'production', PORT: String(PORT), SKIP_DB_INIT: '1',
   GOOGLE_SOLAR_API_KEY: 'test-not-a-key', ANTHROPIC_API_KEY: '', RESEND_API_KEY: '', JN_API_KEY: '',
   SESSION_SECRET: 'smoke-test-only', CAP_GEOCODE_PUBLIC: '3', CAP_QUOTE_PUBLIC: '1000',
+  EMBED_PARENT_ORIGINS: '',
 };
 const srv = spawn(process.execPath, ['-r', path.join(root, 'scripts/fetch-stub.cjs'), path.join(root, 'dist-server/index.js')], { env, cwd: root });
 let log = '';
@@ -126,6 +127,49 @@ try {
     embedHeaders.csp === plainHeaders.csp && embedHeaders.xfo === plainHeaders.xfo && embedHeaders.corp === plainHeaders.corp,
     `quote=${JSON.stringify(plainHeaders)} embed=${JSON.stringify(embedHeaders)}`,
   );
+  const unsetQuoteHtml = await (await req('/quote')).text();
+  check('unset EMBED_PARENT_ORIGINS does not inject a parent list', !unsetQuoteHtml.includes('measurenow-embed-origins'));
+
+  const previewPort = 4001;
+  const previewBase = `http://127.0.0.1:${previewPort}`;
+  const previewEnv = {
+    ...env,
+    PORT: String(previewPort),
+    EMBED_PARENT_ORIGINS: 'https://preview.example.com, *, http://x.com, https://x.com/path, https://*.x.com, "><script>, ',
+  };
+  const preview = spawn(process.execPath, ['-r', path.join(root, 'scripts/fetch-stub.cjs'), path.join(root, 'dist-server/index.js')], { env: previewEnv, cwd: root });
+  let previewLog = '';
+  preview.stdout.on('data', d => { previewLog += d; });
+  preview.stderr.on('data', d => { previewLog += d; });
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(previewBase + '/quote'); break; } catch { await new Promise(r => setTimeout(r, 200)); }
+    }
+    const previewQuote = await fetch(previewBase + '/quote');
+    const previewCsp = previewQuote.headers.get('content-security-policy');
+    const previewBody = await previewQuote.text();
+    const expectedCsp = `${FRAME_ANCESTORS} https://preview.example.com`;
+    check('preview origin is appended to frame-ancestors', previewQuote.status === 200 && previewCsp === expectedCsp && previewQuote.headers.get('x-frame-options') === null && previewQuote.headers.get('cross-origin-resource-policy') === 'cross-origin', `csp=${previewCsp}`);
+    const marker = previewBody.match(/<script type="application\/json" id="measurenow-embed-origins">([\s\S]*?)<\/script>/);
+    let listed = null;
+    try { listed = marker ? JSON.parse(marker[1]) : null; } catch { listed = null; }
+    check(
+      'quote HTML gives the client the same parent list',
+      JSON.stringify(listed) === JSON.stringify(['https://kanddroofingnc.com', 'https://www.kanddroofingnc.com', 'https://preview.example.com']),
+      `listed=${JSON.stringify(listed)}`,
+    );
+    check(
+      'rejected embed values do not become markup or log text',
+      !previewBody.includes('"><script>') && !previewBody.includes('http://x.com') && !previewBody.includes('*.x.com')
+        && previewLog.includes('EMBED_PARENT_ORIGINS: ignored 5 invalid entries')
+        && !previewLog.includes('"><script>') && !previewLog.includes('http://x.com') && !previewLog.includes('*.x.com'),
+    );
+    const previewHome = await fetch(previewBase + '/');
+    check('preview env leaves other pages SAMEORIGIN', previewHome.headers.get('x-frame-options') === 'SAMEORIGIN' && previewHome.headers.get('content-security-policy') === null);
+  } finally {
+    preview.kill();
+  }
+
   for (const p of ['/', '/login', '/api/roof/maps-key']) {
     r = await req(p);
     const csp = r.headers.get('content-security-policy');

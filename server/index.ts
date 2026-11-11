@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -17,6 +18,11 @@ dotenv.config();
 
 import { initDb } from './db';
 import { corsOptionsDelegate, blockForeignOrigins } from './middleware/security';
+import {
+  HARDCODED_EMBED_ORIGINS,
+  embedOriginsScript,
+  parseEmbedParentOrigins,
+} from './embedOrigins';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -34,11 +40,11 @@ app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
 // CORP is cross-origin on that document only. The marketing site's no-cors
 // probe of the iframe URL fails when Helmet's default same-origin CORP is set,
 // even after the page is embeddable. Other routes keep same-origin.
-const QUOTE_FRAME_ANCESTORS = [
-  "'self'",
-  'https://kanddroofingnc.com',
-  'https://www.kanddroofingnc.com',
-];
+const embedOrigins = parseEmbedParentOrigins(process.env.EMBED_PARENT_ORIGINS, message => {
+  console.warn(message);
+});
+const QUOTE_FRAME_ANCESTORS = ["'self'", ...embedOrigins];
+const extraEmbedOrigins = embedOrigins.length > HARDCODED_EMBED_ORIGINS.length;
 const defaultHelmet = helmet({ contentSecurityPolicy: false });
 const quoteEmbedHelmet = helmet({
   contentSecurityPolicy: {
@@ -107,9 +113,21 @@ app.use('/api', (_req, res) => {
 
 // Serve static frontend in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '..', 'dist')));
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  const distDir = path.join(__dirname, '..', 'dist');
+  const indexFile = path.join(distDir, 'index.html');
+  let quoteHtml: string | null = null;
+  app.use(express.static(distDir));
+  app.get('*', (req, res) => {
+    if (extraEmbedOrigins && isQuoteDocument(req.path)) {
+      if (quoteHtml == null) {
+        const shell = fs.readFileSync(indexFile, 'utf8');
+        const tag = embedOriginsScript(embedOrigins);
+        quoteHtml = shell.includes('<head>') ? shell.replace('<head>', `<head>${tag}`) : `${tag}${shell}`;
+      }
+      res.type('html').send(quoteHtml);
+      return;
+    }
+    res.sendFile(indexFile);
   });
 }
 

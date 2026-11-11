@@ -18,6 +18,14 @@ import {
   quotePageChrome,
 } from '../src/quoteChrome';
 import { calculateQuote, HDZ_PRICE_PER_SQUARE, UHDZ_PRICE_PER_SQUARE, UHDZ_UPGRADE_PER_SQUARE } from '../server/services/pricing';
+import {
+  HARDCODED_EMBED_ORIGINS,
+  embedOriginsScript,
+  htmlSafeJson,
+  isExactHttpsOrigin,
+  parseEmbedParentOrigins,
+  readEmbedParentOrigins,
+} from '../server/embedOrigins';
 import type { BuildingRoofData } from '../server/services/solar';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -199,5 +207,49 @@ check('standard roof prices HDZ and UHDZ after 15% waste', standard.hdzEstimate 
 check('pitch of 35 degrees does not add the steep surcharge', atThreshold.hdzEstimate === 9900 && atThreshold.uhdzEstimate === 10800);
 check('pitch over 35 degrees adds 10%', steep.hdzEstimate === 10900 && steep.uhdzEstimate === 11900, JSON.stringify({ hdz: steep.hdzEstimate, uhdz: steep.uhdzEstimate }));
 check('waste factor stays 15%', standard.wasteFactor === 1.15);
+
+const hardcoded = [...HARDCODED_EMBED_ORIGINS];
+const silent: string[] = [];
+check('unset embed parents stay the two sites', JSON.stringify(parseEmbedParentOrigins(undefined, message => silent.push(message))) === JSON.stringify(hardcoded) && silent.length === 0);
+check('blank embed parents stay the two sites', JSON.stringify(parseEmbedParentOrigins('  ,  ', message => silent.push(message))) === JSON.stringify(hardcoded) && silent.length === 0);
+const preview = 'https://preview.example.com';
+const warnings: string[] = [];
+const raw = `${preview}, *, http://x.com, https://x.com/path, https://*.x.com, "><script>, `;
+const parsedOrigins = parseEmbedParentOrigins(raw, message => warnings.push(message));
+check(
+  'a valid preview origin is appended and duplicates are not required',
+  JSON.stringify(parsedOrigins) === JSON.stringify([...hardcoded, preview]),
+);
+check(
+  'invalid embed origins are counted without echoing them',
+  warnings.length === 1 && warnings[0] === 'EMBED_PARENT_ORIGINS: ignored 5 invalid entries' && !warnings[0].includes('*') && !warnings[0].includes('http') && !warnings[0].includes('script'),
+);
+for (const bad of ['*', 'http://x.com', 'https://x.com/path', 'https://*.x.com', '"><script>', 'https://x.com/', 'https://x.com?q=1']) {
+  check(`rejected embed origin ${bad}`, !isExactHttpsOrigin(bad));
+}
+check('hardcoded origins are not duplicated', parseEmbedParentOrigins(` ${hardcoded[0]} , ${preview} `).length === 3);
+const nasty = htmlSafeJson(['</script><script>alert(1)</script>', 'a&b', 'line\u2028sep\u2029']);
+check('embed JSON cannot break out of the script tag', !nasty.includes('<') && !nasty.includes('>') && !nasty.includes('&') && !nasty.includes('\u2028') && !nasty.includes('\u2029'));
+const injected = embedOriginsScript(parsedOrigins);
+check('injected block is not an executable script', injected.startsWith('<script type="application/json"') && !injected.includes('"><script>'));
+const payload = injected.slice(injected.indexOf('>') + 1, injected.lastIndexOf('</script>'));
+const clientList = readEmbedParentOrigins({
+  getElementById(id: string) {
+    return id === 'measurenow-embed-origins' ? { textContent: payload } : null;
+  },
+});
+check('client revalidates the injected preview list', JSON.stringify(clientList) === JSON.stringify(parsedOrigins));
+const hostile = readEmbedParentOrigins({
+  getElementById() {
+    return { textContent: JSON.stringify(['*', 'http://x.com', 'https://ok.example', preview]) };
+  },
+});
+check(
+  'client drops bad origins and keeps the two sites first',
+  hostile[0] === hardcoded[0] && hostile[1] === hardcoded[1] && hostile.includes('https://ok.example') && hostile.includes(preview) && !hostile.includes('*') && !hostile.some(origin => origin.startsWith('http://')),
+);
+check('client falls back when the payload is not JSON', JSON.stringify(readEmbedParentOrigins({
+  getElementById() { return { textContent: '{"not":"a list"' }; },
+})) === JSON.stringify(hardcoded));
 
 if (failed) process.exit(1);
