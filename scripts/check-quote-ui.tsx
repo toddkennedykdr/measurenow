@@ -6,6 +6,7 @@ import { AuthProvider } from '../src/context/AuthContext';
 import App from '../src/App';
 import { NavBar } from '../src/components/NavBar';
 import { QuoteResult } from '../src/components/QuoteResult';
+import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../src/quoteIncludes';
 import type { FullQuoteData } from '../src/types';
 import {
   KD_CALL,
@@ -113,10 +114,34 @@ check(
   result.includes('href="tel:+19199774074"') && result.includes('Call K&amp;D Roofing: (919) 977-4074'),
 );
 check('quote result has the disclaimer', result.includes(QUOTE_DISCLAIMER));
-check('quote result shows HDZ as the main price', result.includes('GAF Timberline HDZ') && result.includes('$9,900') && !result.includes('$9,900 –'));
 check(
-  'quote result shows the UHDZ upgrade line',
-  result.includes('Optional upgrade: GAF Timberline UHDZ +$40/sq ($470/sq) · $10,800'),
+  'quote result shows HDZ as the selected price',
+  result.includes('GAF Timberline HDZ')
+    && result.includes('$9,900')
+    && result.includes('$430/sq')
+    && !result.includes('$9,900 –')
+    && result.indexOf('aria-checked="true"') !== -1
+    && result.indexOf('aria-checked="true"') < result.indexOf('GAF Timberline HDZ')
+    && result.indexOf('GAF Timberline HDZ') < result.indexOf('aria-checked="false"'),
+);
+check(
+  'quote result shows the UHDZ option at +$40/sq ($470/sq)',
+  result.includes('GAF Timberline UHDZ') && result.includes('+$40/sq ($470/sq)') && result.includes('$10,800'),
+);
+check(
+  'quote result warranty badge uses the GAF labor warranty wording',
+  result.includes(QUOTE_WARRANTY) && !result.includes('30-year') && !result.includes('Architectural shingles'),
+);
+check(
+  'quote result includes list is tear-off, underlayment, and cleanup',
+  JSON.stringify([...QUOTE_INCLUDES]) === JSON.stringify(['tear-off', 'underlayment', 'cleanup'])
+    && result.includes('<li>tear-off</li>')
+    && result.includes('<li>underlayment</li>')
+    && result.includes('<li>cleanup</li>'),
+);
+check(
+  'quote result names GAF Master Elite in plain text',
+  result.includes(GAF_MASTER_ELITE_LABEL) && result.includes(`Contractor ID ${GAF_CONTRACTOR_ID}`) && !result.includes('<img'),
 );
 check('call constant matches the public link', KD_CALL.href === 'tel:+19199774074' && KD_CALL.label === 'Call K&D Roofing: (919) 977-4074');
 

@@ -1,11 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import type { FullQuoteData } from '../types';
 import { KD_CALL, QUOTE_DISCLAIMER } from '../quoteChrome';
+import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../quoteIncludes';
 
 interface Props {
   data: FullQuoteData;
   onLeadSubmitted: (name: string) => void;
 }
+
+type ShingleOption = 'hdz' | 'uhdz';
 
 export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [name, setName] = useState('');
@@ -13,6 +16,8 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Display-only. The lead still sends both HDZ and UHDZ totals.
+  const [option, setOption] = useState<ShingleOption>('hdz');
 
   const { quote, roofData, address } = data;
 
@@ -64,19 +69,9 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   return (
     <div className="card">
       <div className="quote-result">
-        <p className="quote-result__address">📍 {address}</p>
+        <p className="quote-result__address">{address}</p>
 
-        <div className="quote-result__price">
-          {formatPrice(quote.hdzEstimate)}
-        </div>
-        <p className="quote-result__price-label">GAF Timberline HDZ · ${quote.hdzPricePerSquare}/sq</p>
-        <p className="quote-result__disclaimer">{QUOTE_DISCLAIMER}</p>
-        <p className="quote-result__upgrade">
-          {`Optional upgrade: GAF Timberline UHDZ +$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq) · ${formatPrice(quote.uhdzEstimate)}`}
-        </p>
-        <a className="quote-result__call" href={KD_CALL.href}>{KD_CALL.label}</a>
-
-        <div className="quote-stats">
+        <div className="quote-stats" role="group" aria-label="Roof measurement">
           <div className="quote-stat">
             <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
             <span className="quote-stat__label">Sq Ft</span>
@@ -91,8 +86,57 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           </div>
         </div>
 
+        <h2 id="shingle-options-label" className="quote-result__heading">Shingle options</h2>
+        <div className="quote-options" role="radiogroup" aria-labelledby="shingle-options-label">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={option === 'hdz'}
+            className={option === 'hdz' ? 'quote-option quote-option--selected' : 'quote-option'}
+            onClick={() => setOption('hdz')}
+          >
+            <span className={option === 'hdz' ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
+              {option === 'hdz' ? 'Selected' : 'Select'}
+            </span>
+            <span className="quote-option__name">GAF Timberline HDZ</span>
+            <span className="quote-result__price">{formatPrice(quote.hdzEstimate)}</span>
+            <span className="quote-option__rate">{`$${quote.hdzPricePerSquare}/sq`}</span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={option === 'uhdz'}
+            className={option === 'uhdz' ? 'quote-option quote-option--selected' : 'quote-option'}
+            onClick={() => setOption('uhdz')}
+          >
+            <span className={option === 'uhdz' ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
+              {option === 'uhdz' ? 'Selected' : 'Select'}
+            </span>
+            <span className="quote-option__name">GAF Timberline UHDZ</span>
+            <span className="quote-result__price">{formatPrice(quote.uhdzEstimate)}</span>
+            <span className="quote-option__rate quote-result__upgrade">
+              {`+$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq)`}
+            </span>
+          </button>
+        </div>
+
+        <p className="quote-warranty">
+          <span className="quote-warranty__badge">{QUOTE_WARRANTY}</span>
+        </p>
+
+        <p className="quote-elite">{GAF_MASTER_ELITE_LABEL}</p>
+        <p className="quote-elite__id">{`Contractor ID ${GAF_CONTRACTOR_ID}`}</p>
+
+        <p className="quote-result__disclaimer">{QUOTE_DISCLAIMER}</p>
+        <a className="quote-result__call" href={KD_CALL.href}>{KD_CALL.label}</a>
+
         <div className="quote-material">
-          <strong>Includes:</strong> {quote.materialNote}
+          <div className="quote-material__title">Includes</div>
+          <ul className="quote-material__list">
+            {QUOTE_INCLUDES.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </div>
       </div>
 

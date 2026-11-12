@@ -81,7 +81,7 @@ export default function App() {
   return (
     <>
     {!hideHeader && <NavBar />}
-    <div className="widget">
+    <div className={step === 'quote' ? 'widget widget--quote' : 'widget'}>
       {!hideHeader && (
         <header className="header">
           <BrandLogo size="login" />
