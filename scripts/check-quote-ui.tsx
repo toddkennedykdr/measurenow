@@ -47,7 +47,7 @@ function render(entry: string, node: ReactNode) {
   );
 }
 
-const TAGLINE = 'Serving North Carolina since 2018';
+const TAGLINE = 'Serving North Carolina since 2017';
 const unframed = render('/quote', <App />);
 const embed = render('/quote?embed=1', <App />);
 const home = render('/', <NavBar />);

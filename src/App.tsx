@@ -85,7 +85,7 @@ export default function App() {
       {!hideHeader && (
         <header className="header">
           <BrandLogo size="login" />
-          <div className="header__tagline">Serving North Carolina since 2018</div>
+          <div className="header__tagline">Serving North Carolina since 2017</div>
         </header>
       )}
 
