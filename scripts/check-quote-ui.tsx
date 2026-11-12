@@ -144,6 +144,19 @@ check(
   result.includes(GAF_MASTER_ELITE_LABEL) && result.includes(`Contractor ID ${GAF_CONTRACTOR_ID}`) && !result.includes('<img'),
 );
 check('call constant matches the public link', KD_CALL.href === 'tel:+19199774074' && KD_CALL.label === 'Call K&D Roofing: (919) 977-4074');
+check(
+  'call number stays on one line',
+  result.includes('class="quote-result__call-number"')
+    && result.includes('aria-label="Call K&amp;D Roofing: (919) 977-4074"')
+    && result.includes('(919) 977-4074'),
+);
+check(
+  'shingle options use a roving tabindex',
+  result.includes('role="radiogroup"')
+    && result.indexOf('tabindex="0"') !== -1
+    && result.indexOf('tabindex="0"') < result.indexOf('GAF Timberline HDZ')
+    && result.indexOf('GAF Timberline HDZ') < result.indexOf('tabindex="-1"'),
+);
 
 const calls: { data: unknown; origin: string }[] = [];
 const self = {};
@@ -204,8 +217,14 @@ check('customer copy does not use a bare K&D', !/K&(?:amp;)?D/.test(withoutFullN
 const styles = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles.css'), 'utf8');
 const disclaimerRule = styles.slice(styles.indexOf('.quote-result__disclaimer'), styles.indexOf('.quote-result__upgrade'));
 const callRule = styles.slice(styles.indexOf('.quote-result__call {'), styles.indexOf('.quote-result__call:hover'));
+const numberRuleStart = styles.indexOf('.quote-result__call-number');
+const numberRule = styles.slice(numberRuleStart, styles.indexOf('}', numberRuleStart) + 1);
+const btnStart = styles.indexOf('.btn {');
+const btnRule = styles.slice(btnStart, styles.indexOf('}', btnStart) + 1);
 check('disclaimer font is 14px', disclaimerRule.includes('font-size: 14px;'));
 check('call link tap target is at least 48px', callRule.includes('min-height: 48px;'));
+check('call number css does not wrap', numberRule.includes('white-space: nowrap;'));
+check('detailed estimate button is at least 48px', btnRule.includes('min-height: 48px;'));
 
 const pricing = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../server/services/pricing.ts'), 'utf8');
 check('pricing comment names HDZ $430 and UHDZ $470', pricing.includes('$430') && pricing.includes('$470') && !pricing.includes('$350') && !pricing.includes('$555'));

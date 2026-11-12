@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { FullQuoteData } from '../types';
 import { KD_CALL, QUOTE_DISCLAIMER } from '../quoteChrome';
 import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../quoteIncludes';
@@ -18,6 +18,15 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [error, setError] = useState('');
   // Display-only. The lead still sends both HDZ and UHDZ totals.
   const [option, setOption] = useState<ShingleOption>('hdz');
+  const optionRefs = useRef<Record<ShingleOption, HTMLButtonElement | null>>({ hdz: null, uhdz: null });
+
+  function onOptionsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    const next: ShingleOption = option === 'hdz' ? 'uhdz' : 'hdz';
+    setOption(next);
+    optionRefs.current[next]?.focus();
+  }
 
   const { quote, roofData, address } = data;
 
@@ -87,11 +96,18 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         </div>
 
         <h2 id="shingle-options-label" className="quote-result__heading">Shingle options</h2>
-        <div className="quote-options" role="radiogroup" aria-labelledby="shingle-options-label">
+        <div
+          className="quote-options"
+          role="radiogroup"
+          aria-labelledby="shingle-options-label"
+          onKeyDown={onOptionsKeyDown}
+        >
           <button
             type="button"
             role="radio"
             aria-checked={option === 'hdz'}
+            tabIndex={option === 'hdz' ? 0 : -1}
+            ref={(node) => { optionRefs.current.hdz = node; }}
             className={option === 'hdz' ? 'quote-option quote-option--selected' : 'quote-option'}
             onClick={() => setOption('hdz')}
           >
@@ -106,6 +122,8 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
             type="button"
             role="radio"
             aria-checked={option === 'uhdz'}
+            tabIndex={option === 'uhdz' ? 0 : -1}
+            ref={(node) => { optionRefs.current.uhdz = node; }}
             className={option === 'uhdz' ? 'quote-option quote-option--selected' : 'quote-option'}
             onClick={() => setOption('uhdz')}
           >
@@ -128,7 +146,10 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         <p className="quote-elite__id">{`Contractor ID ${GAF_CONTRACTOR_ID}`}</p>
 
         <p className="quote-result__disclaimer">{QUOTE_DISCLAIMER}</p>
-        <a className="quote-result__call" href={KD_CALL.href}>{KD_CALL.label}</a>
+        <a className="quote-result__call" href={KD_CALL.href} aria-label={KD_CALL.label}>
+          <span className="quote-result__call-label">Call K&D Roofing:</span>
+          <span className="quote-result__call-number">(919) 977-4074</span>
+        </a>
 
         <div className="quote-material">
           <div className="quote-material__title">Includes</div>
