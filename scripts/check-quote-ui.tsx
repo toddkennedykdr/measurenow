@@ -128,16 +128,56 @@ check(
   'quote result shows the UHDZ option at +$40/sq ($470/sq)',
   result.includes('GAF Timberline UHDZ') && result.includes('+$40/sq ($470/sq)') && result.includes('$10,800'),
 );
+const warrantyLines = [...QUOTE_WARRANTY.lines];
+const includeTexts = QUOTE_INCLUDES.map((item) => item.text);
+const financing = QUOTE_INCLUDES[QUOTE_INCLUDES.length - 1];
+const financingHref = 'https://projects.greensky.com/MerchantLoanApplication?apptype=short&merchant=81101872&dealerplan=2521&channel=External-Button-03';
+function countText(haystack: string, needle: string) {
+  return haystack.split(needle).length - 1;
+}
+function appearsInOrder(haystack: string, parts: readonly string[]) {
+  let at = -1;
+  return parts.every((part) => {
+    const next = haystack.indexOf(part, at + 1);
+    if (next === -1) return false;
+    at = next;
+    return true;
+  });
+}
 check(
-  'quote result warranty badge uses the GAF labor warranty wording',
-  result.includes(QUOTE_WARRANTY) && !result.includes('30-year') && !result.includes('Architectural shingles'),
+  'quote result warranty section uses the Golden Pledge lines',
+  QUOTE_WARRANTY.label === 'Warranty:'
+    && warrantyLines.length === 3
+    && warrantyLines[0] === 'GAF Golden Pledge Warranty, 50-year shingle with 25-year labor backed by GAF'
+    && warrantyLines[1] === 'Unlimited wind warranty on shingles'
+    && warrantyLines[2] === '25-year algae resistance warranty'
+    && result.includes('Warranty:')
+    && appearsInOrder(result, warrantyLines)
+    && warrantyLines.every((line) => countText(result, line) === 2)
+    && result.includes('25-year labor')
+    && !result.includes('30-year')
+    && !result.includes('Architectural shingles')
+    && !result.includes('50-year shingle with a 25-year labor warranty backed by the manufacturer (GAF)'),
 );
 check(
-  'quote result includes list is tear-off, underlayment, and cleanup',
-  JSON.stringify([...QUOTE_INCLUDES]) === JSON.stringify(['tear-off', 'underlayment', 'cleanup'])
-    && result.includes('<li>tear-off</li>')
-    && result.includes('<li>underlayment</li>')
-    && result.includes('<li>cleanup</li>'),
+  'quote result shows the seven included items on both cards',
+  includeTexts.length === 7
+    && includeTexts[0] === 'Full tear-off plus up to 2 sheets of decking replaced'
+    && includeTexts[6] === 'Financing is available'
+    && !includeTexts.some((text) => text.startsWith('GAF Golden Pledge'))
+    && appearsInOrder(result, includeTexts)
+    && includeTexts.every((text) => countText(result, text) === 2)
+    && countText(result, "What's included") + countText(result, "What&#x27;s included") === 2,
+);
+check(
+  'financing include links to the GreenSky application',
+  financing.text === 'Financing is available'
+    && financing.linkText === 'Click here to apply'
+    && financing.href === financingHref
+    && countText(result, `href="${financingHref.replace(/&/g, '&amp;')}"`) === 2
+    && countText(result, 'target="_blank"') === 2
+    && countText(result, 'rel="noopener noreferrer"') === 2
+    && countText(result, 'Click here to apply') === 2,
 );
 check(
   'quote result names GAF Master Elite in plain text',
