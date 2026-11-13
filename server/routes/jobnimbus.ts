@@ -1,49 +1,10 @@
-import { NextFunction, Request, Response, Router } from 'express';
+import { Router, Request, Response } from 'express';
+import { requireAuth } from '../middleware/security';
 
 export const jnRouter = Router();
 
 const JN_BASE = 'https://app.jobnimbus.com/api1';
-const MISSING_KEY_WARNING =
-  'JobNimbus API key is not set (JN_API_KEY or JOBNIMBUS_API_KEY). JobNimbus routes will return 503.';
-
-let missingKeyWarned = false;
-
-// JN_API_KEY is the production name. JOBNIMBUS_API_KEY is an alias. No literal fallback.
-export function readJobNimbusApiKey(): string {
-  const primary = process.env.JN_API_KEY?.trim() || '';
-  if (primary) return primary;
-  return process.env.JOBNIMBUS_API_KEY?.trim() || '';
-}
-
-export function warnIfJobNimbusUnconfigured(): void {
-  if (readJobNimbusApiKey()) return;
-  if (missingKeyWarned) return;
-  missingKeyWarned = true;
-  console.warn(MISSING_KEY_WARNING);
-}
-
-export function resetJobNimbusWarningForTests(): void {
-  missingKeyWarned = false;
-}
-
-function requireJobNimbus(_req: Request, res: Response, next: NextFunction): void {
-  if (!readJobNimbusApiKey()) {
-    warnIfJobNimbusUnconfigured();
-    res.status(503).json({ error: 'JobNimbus is not configured' });
-    return;
-  }
-  next();
-}
-
-function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!(req.session as any)?.userId) {
-    res.status(401).json({ error: 'Not authenticated' });
-    return;
-  }
-  next();
-}
-
-jnRouter.use(requireJobNimbus);
+const JN_TOKEN = process.env.JOBNIMBUS_API_KEY || 'mlfiyztya8bjzm92';
 
 // Search jobs
 jnRouter.get('/jobs', requireAuth, async (req: Request, res: Response) => {
@@ -51,7 +12,7 @@ jnRouter.get('/jobs', requireAuth, async (req: Request, res: Response) => {
     const keyword = req.query.keyword as string || '';
     const url = `${JN_BASE}/jobs?keyword=${encodeURIComponent(keyword)}`;
     const jnRes = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${readJobNimbusApiKey()}` },
+      headers: { 'Authorization': `Bearer ${JN_TOKEN}` },
     });
     if (!jnRes.ok) {
       const text = await jnRes.text();
@@ -74,7 +35,7 @@ jnRouter.post('/upload', requireAuth, async (req: Request, res: Response) => {
 
     // Create a simple HTML file for the report
     const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Inspection Report - ${address}</title>
-    <style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#374151}</style>
+    <style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#4a5568}</style>
     </head><body>${reportHtml}</body></html>`;
     
     const blob = new Blob([fullHtml], { type: 'text/html' });
@@ -87,7 +48,7 @@ jnRouter.post('/upload', requireAuth, async (req: Request, res: Response) => {
     // First, try the /files endpoint
     const uploadRes = await fetch(`${JN_BASE}/files`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${readJobNimbusApiKey()}` },
+      headers: { 'Authorization': `Bearer ${JN_TOKEN}` },
       body: formData,
     });
 
@@ -97,7 +58,7 @@ jnRouter.post('/upload', requireAuth, async (req: Request, res: Response) => {
       const noteRes = await fetch(`${JN_BASE}/activities`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${readJobNimbusApiKey()}`,
+          'Authorization': `Bearer ${JN_TOKEN}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -115,7 +76,7 @@ jnRouter.post('/upload', requireAuth, async (req: Request, res: Response) => {
     const noteRes = await fetch(`${JN_BASE}/activities`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${readJobNimbusApiKey()}`,
+        'Authorization': `Bearer ${JN_TOKEN}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

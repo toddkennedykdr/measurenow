@@ -15,8 +15,10 @@ interface Props {
 }
 
 /**
- * NOTE: The Google Maps JavaScript API must be enabled for GOOGLE_MAPS_BROWSER_KEY
- * (HTTP referrer restricted). The Solar server key must not be sent to the browser.
+ * NOTE: Maps JS is loaded with GOOGLE_MAPS_BROWSER_KEY from GET /api/roof/maps-key
+ * (falls back to GOOGLE_SOLAR_API_KEY only when that browser key is unset).
+ * Enable "Maps JavaScript API" for that key at
+ * https://console.cloud.google.com/apis/library/maps-backend.googleapis.com
  */
 
 // Load the Google Maps script once globally
@@ -56,7 +58,7 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
   const initMap = useCallback(async () => {
     try {
       // Get the API key from the server
-      const res = await fetch('/api/roof/maps-key', { credentials: 'include' });
+      const res = await fetch('/api/roof/maps-key');
       const { key } = await res.json();
       await loadGoogleMaps(key);
 
@@ -81,6 +83,14 @@ export function ConfirmAddress({ address, lat, lng, onConfirm, onReject }: Props
         map,
         draggable: true,
         title: 'Your home',
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: '#1b5de0',
+          fillOpacity: 1,
+          strokeColor: '#f5a623',
+          strokeWeight: 3,
+        },
       });
 
       marker.addListener('dragend', () => {

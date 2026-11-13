@@ -21,7 +21,6 @@ export function AddressForm({ onGeocoded }: Props) {
       const res = await fetch('/api/roof/geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ address: address.trim() }),
       });
 
