@@ -10,17 +10,40 @@ interface Props {
 
 type ShingleOption = 'hdz' | 'uhdz';
 
-function QuoteChoiceDetails() {
+const QUOTE_PHOTOS = {
+  hdz: {
+    src: '/images/gaf-timberline-hdz.webp',
+    alt: 'Roof with GAF Timberline HDZ shingles',
+    width: 800,
+    height: 533,
+  },
+  uhdz: {
+    src: '/images/gaf-timberline-uhdz.webp',
+    alt: 'Roof with GAF Timberline UHDZ shingles',
+    width: 800,
+    height: 450,
+  },
+} as const;
+
+function QuotePanel({ tier, selected }: { tier: ShingleOption; selected: boolean }) {
+  const photo = QUOTE_PHOTOS[tier];
   return (
-    <div className="quote-choice__details">
+    <div className={selected ? `quote-panel quote-panel--${tier} quote-panel--selected` : `quote-panel quote-panel--${tier}`}>
+      <img
+        className="quote-photo"
+        src={photo.src}
+        alt={photo.alt}
+        width={photo.width}
+        height={photo.height}
+        loading="lazy"
+      />
       <div className="quote-warranty">
         <p className="quote-warranty__line">
           <strong className="quote-warranty__label">{`${QUOTE_WARRANTY.label} `}</strong>
-          {QUOTE_WARRANTY.lines[0]}
+          {QUOTE_WARRANTY.goldenPledge[tier]}
         </p>
-        {QUOTE_WARRANTY.lines.slice(1).map((line) => (
-          <p className="quote-warranty__line" key={line}>{line}</p>
-        ))}
+        <p className="quote-warranty__line">{QUOTE_WARRANTY.wind}</p>
+        <p className="quote-warranty__line">{QUOTE_WARRANTY.algae[tier]}</p>
       </div>
       <div className="quote-material">
         <div className="quote-material__title">What's included</div>
@@ -129,20 +152,20 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         </div>
 
         <h2 id="shingle-options-label" className="quote-result__heading">Shingle options</h2>
-        <div
-          className="quote-options"
-          role="radiogroup"
-          aria-labelledby="shingle-options-label"
-          onKeyDown={onOptionsKeyDown}
-        >
-          <div className={option === 'hdz' ? 'quote-choice quote-choice--selected' : 'quote-choice'}>
+        <div className="quote-options">
+          <div
+            className="quote-radiogroup"
+            role="radiogroup"
+            aria-labelledby="shingle-options-label"
+            onKeyDown={onOptionsKeyDown}
+          >
             <button
               type="button"
               role="radio"
               aria-checked={option === 'hdz'}
               tabIndex={option === 'hdz' ? 0 : -1}
               ref={(node) => { optionRefs.current.hdz = node; }}
-              className={option === 'hdz' ? 'quote-option quote-option--selected' : 'quote-option'}
+              className={option === 'hdz' ? 'quote-option quote-option--hdz quote-option--selected' : 'quote-option quote-option--hdz'}
               onClick={() => setOption('hdz')}
             >
               <span className={option === 'hdz' ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
@@ -152,16 +175,13 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
               <span className="quote-result__price">{formatPrice(quote.hdzEstimate)}</span>
               <span className="quote-option__rate">{`$${quote.hdzPricePerSquare}/sq`}</span>
             </button>
-            <QuoteChoiceDetails />
-          </div>
-          <div className={option === 'uhdz' ? 'quote-choice quote-choice--selected' : 'quote-choice'}>
             <button
               type="button"
               role="radio"
               aria-checked={option === 'uhdz'}
               tabIndex={option === 'uhdz' ? 0 : -1}
               ref={(node) => { optionRefs.current.uhdz = node; }}
-              className={option === 'uhdz' ? 'quote-option quote-option--selected' : 'quote-option'}
+              className={option === 'uhdz' ? 'quote-option quote-option--uhdz quote-option--selected' : 'quote-option quote-option--uhdz'}
               onClick={() => setOption('uhdz')}
             >
               <span className={option === 'uhdz' ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
@@ -173,8 +193,9 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
                 {`+$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq)`}
               </span>
             </button>
-            <QuoteChoiceDetails />
           </div>
+          <QuotePanel tier="hdz" selected={option === 'hdz'} />
+          <QuotePanel tier="uhdz" selected={option === 'uhdz'} />
         </div>
 
         <p className="quote-elite">{GAF_MASTER_ELITE_LABEL}</p>

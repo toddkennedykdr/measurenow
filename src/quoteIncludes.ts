@@ -4,14 +4,18 @@ export type QuoteIncludeItem = {
   linkText?: string;
 };
 
-/** Warranty lines on each shingle card. The label is separate from the sentences. */
+/** Warranty copy for each shingle card. Labor and algae years differ by product. */
 export const QUOTE_WARRANTY = {
   label: 'Warranty:',
-  lines: [
-    'GAF Golden Pledge Warranty, 50-year shingle with 25-year labor backed by GAF',
-    'Unlimited wind warranty on shingles',
-    '25-year algae resistance warranty',
-  ],
+  wind: '15-year WindProven™ Limited Wind Warranty, no max wind speed',
+  goldenPledge: {
+    hdz: 'GAF Golden Pledge Warranty, 50-year shingle with 25-year labor backed by GAF',
+    uhdz: 'GAF Golden Pledge Warranty, 50-year shingle with 30-year labor backed by GAF',
+  },
+  algae: {
+    hdz: '25-year StainGuard Plus™ Algae Protection Limited Warranty',
+    uhdz: '30-year StainGuard Plus PRO™ Algae Protection Limited Warranty',
+  },
 } as const;
 
 /** What's included on each shingle card. Edit this list to change those items. */

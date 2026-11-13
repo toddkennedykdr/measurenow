@@ -128,8 +128,10 @@ check(
   'quote result shows the UHDZ option at +$40/sq ($470/sq)',
   result.includes('GAF Timberline UHDZ') && result.includes('+$40/sq ($470/sq)') && result.includes('$10,800'),
 );
-const warrantyLines = [...QUOTE_WARRANTY.lines];
 const includeTexts = QUOTE_INCLUDES.map((item) => item.text);
+const radiogroupHtml = result.slice(result.indexOf('role="radiogroup"'), result.indexOf('quote-panel--hdz'));
+const hdzPanel = result.slice(result.indexOf('quote-panel--hdz'), result.indexOf('quote-panel--uhdz'));
+const uhdzPanel = result.slice(result.indexOf('quote-panel--uhdz'));
 const financing = QUOTE_INCLUDES[QUOTE_INCLUDES.length - 1];
 const financingHref = 'https://projects.greensky.com/MerchantLoanApplication?apptype=short&merchant=81101872&dealerplan=2521&channel=External-Button-03';
 function countText(haystack: string, needle: string) {
@@ -145,19 +147,28 @@ function appearsInOrder(haystack: string, parts: readonly string[]) {
   });
 }
 check(
-  'quote result warranty section uses the Golden Pledge lines',
+  'quote result warranty is per card',
   QUOTE_WARRANTY.label === 'Warranty:'
-    && warrantyLines.length === 3
-    && warrantyLines[0] === 'GAF Golden Pledge Warranty, 50-year shingle with 25-year labor backed by GAF'
-    && warrantyLines[1] === 'Unlimited wind warranty on shingles'
-    && warrantyLines[2] === '25-year algae resistance warranty'
-    && result.includes('Warranty:')
-    && appearsInOrder(result, warrantyLines)
-    && warrantyLines.every((line) => countText(result, line) === 2)
-    && result.includes('25-year labor')
-    && !result.includes('30-year')
+    && QUOTE_WARRANTY.goldenPledge.hdz === 'GAF Golden Pledge Warranty, 50-year shingle with 25-year labor backed by GAF'
+    && QUOTE_WARRANTY.goldenPledge.uhdz === 'GAF Golden Pledge Warranty, 50-year shingle with 30-year labor backed by GAF'
+    && QUOTE_WARRANTY.wind === '15-year WindProven™ Limited Wind Warranty, no max wind speed'
+    && QUOTE_WARRANTY.algae.hdz === '25-year StainGuard Plus™ Algae Protection Limited Warranty'
+    && QUOTE_WARRANTY.algae.uhdz === '30-year StainGuard Plus PRO™ Algae Protection Limited Warranty'
+    && hdzPanel.includes(QUOTE_WARRANTY.goldenPledge.hdz)
+    && hdzPanel.includes(QUOTE_WARRANTY.algae.hdz)
+    && hdzPanel.includes(QUOTE_WARRANTY.wind)
+    && !hdzPanel.includes('30-year labor')
+    && !hdzPanel.includes('30-year StainGuard')
+    && uhdzPanel.includes(QUOTE_WARRANTY.goldenPledge.uhdz)
+    && uhdzPanel.includes(QUOTE_WARRANTY.algae.uhdz)
+    && uhdzPanel.includes(QUOTE_WARRANTY.wind)
     && !result.includes('Architectural shingles')
+    && !result.includes('Unlimited wind warranty on shingles')
     && !result.includes('50-year shingle with a 25-year labor warranty backed by the manufacturer (GAF)'),
+);
+check(
+  'financing links are outside the radiogroup',
+  radiogroupHtml.includes('role="radio"') && !radiogroupHtml.includes('<a'),
 );
 check(
   'quote result shows the seven included items on both cards',
@@ -181,7 +192,11 @@ check(
 );
 check(
   'quote result names GAF Master Elite in plain text',
-  result.includes(GAF_MASTER_ELITE_LABEL) && result.includes(`Contractor ID ${GAF_CONTRACTOR_ID}`) && !result.includes('<img'),
+  result.includes(GAF_MASTER_ELITE_LABEL) && result.includes(`Contractor ID ${GAF_CONTRACTOR_ID}`)
+    && result.includes('alt="Roof with GAF Timberline HDZ shingles"')
+    && result.includes('alt="Roof with GAF Timberline UHDZ shingles"')
+    && result.includes('src="/images/gaf-timberline-hdz.webp"')
+    && result.includes('src="/images/gaf-timberline-uhdz.webp"'),
 );
 check('call constant matches the public link', KD_CALL.href === 'tel:+19199774074' && KD_CALL.label === 'Call K&D Roofing: (919) 977-4074');
 check(
