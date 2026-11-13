@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { FullQuoteData } from '../types';
 import { KD_CALL, QUOTE_DISCLAIMER } from '../quoteChrome';
 import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../quoteIncludes';
@@ -21,7 +21,7 @@ const QUOTE_PHOTOS = {
     src: '/images/gaf-timberline-uhdz.webp',
     alt: 'Roof with GAF Timberline UHDZ shingles',
     width: 800,
-    height: 450,
+    height: 533,
   },
 } as const;
 
@@ -72,7 +72,19 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [error, setError] = useState('');
   // Display-only. The lead still sends both HDZ and UHDZ totals.
   const [option, setOption] = useState<ShingleOption>('hdz');
+  const [wide, setWide] = useState(false);
   const optionRefs = useRef<Record<ShingleOption, HTMLButtonElement | null>>({ hdz: null, uhdz: null });
+  const boardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const apply = () => setWide(el.clientWidth >= 560);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   function onOptionsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const target = event.target;
@@ -88,6 +100,35 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
 
   const formatPrice = (n: number) =>
     n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+
+  function shingleRadio(tier: ShingleOption) {
+    const selected = option === tier;
+    const name = tier === 'hdz' ? 'GAF Timberline HDZ' : 'GAF Timberline UHDZ';
+    const total = tier === 'hdz' ? quote.hdzEstimate : quote.uhdzEstimate;
+    const rate = tier === 'hdz'
+      ? `$${quote.hdzPricePerSquare}/sq`
+      : `+$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq)`;
+    return (
+      <button
+        key={`${tier}-radio`}
+        id={`shingle-${tier}`}
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        tabIndex={selected ? 0 : -1}
+        ref={(node) => { optionRefs.current[tier] = node; }}
+        className={selected ? `quote-option quote-option--${tier} quote-option--selected` : `quote-option quote-option--${tier}`}
+        onClick={() => setOption(tier)}
+      >
+        <span className={selected ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
+          {selected ? 'Selected' : 'Select'}
+        </span>
+        <span className="quote-option__name">{name}</span>
+        <span className="quote-result__price">{formatPrice(total)}</span>
+        <span className={tier === 'uhdz' ? 'quote-option__rate quote-result__upgrade' : 'quote-option__rate'}>{rate}</span>
+      </button>
+    );
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -152,50 +193,28 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
         </div>
 
         <h2 id="shingle-options-label" className="quote-result__heading">Shingle options</h2>
-        <div className="quote-options">
+        <div className="quote-options" ref={boardRef} onKeyDown={onOptionsKeyDown}>
           <div
             className="quote-radiogroup"
             role="radiogroup"
             aria-labelledby="shingle-options-label"
-            onKeyDown={onOptionsKeyDown}
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={option === 'hdz'}
-              tabIndex={option === 'hdz' ? 0 : -1}
-              ref={(node) => { optionRefs.current.hdz = node; }}
-              className={option === 'hdz' ? 'quote-option quote-option--hdz quote-option--selected' : 'quote-option quote-option--hdz'}
-              onClick={() => setOption('hdz')}
-            >
-              <span className={option === 'hdz' ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
-                {option === 'hdz' ? 'Selected' : 'Select'}
-              </span>
-              <span className="quote-option__name">GAF Timberline HDZ</span>
-              <span className="quote-result__price">{formatPrice(quote.hdzEstimate)}</span>
-              <span className="quote-option__rate">{`$${quote.hdzPricePerSquare}/sq`}</span>
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={option === 'uhdz'}
-              tabIndex={option === 'uhdz' ? 0 : -1}
-              ref={(node) => { optionRefs.current.uhdz = node; }}
-              className={option === 'uhdz' ? 'quote-option quote-option--uhdz quote-option--selected' : 'quote-option quote-option--uhdz'}
-              onClick={() => setOption('uhdz')}
-            >
-              <span className={option === 'uhdz' ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
-                {option === 'uhdz' ? 'Selected' : 'Select'}
-              </span>
-              <span className="quote-option__name">GAF Timberline UHDZ</span>
-              <span className="quote-result__price">{formatPrice(quote.uhdzEstimate)}</span>
-              <span className="quote-option__rate quote-result__upgrade">
-                {`+$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq)`}
-              </span>
-            </button>
-          </div>
-          <QuotePanel tier="hdz" selected={option === 'hdz'} />
-          <QuotePanel tier="uhdz" selected={option === 'uhdz'} />
+            aria-owns="shingle-hdz shingle-uhdz"
+          />
+          {wide ? (
+            <>
+              {shingleRadio('hdz')}
+              {shingleRadio('uhdz')}
+              <QuotePanel key="hdz-panel" tier="hdz" selected={option === 'hdz'} />
+              <QuotePanel key="uhdz-panel" tier="uhdz" selected={option === 'uhdz'} />
+            </>
+          ) : (
+            <>
+              {shingleRadio('hdz')}
+              <QuotePanel key="hdz-panel" tier="hdz" selected={option === 'hdz'} />
+              {shingleRadio('uhdz')}
+              <QuotePanel key="uhdz-panel" tier="uhdz" selected={option === 'uhdz'} />
+            </>
+          )}
         </div>
 
         <p className="quote-elite">{GAF_MASTER_ELITE_LABEL}</p>

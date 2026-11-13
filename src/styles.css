@@ -486,13 +486,21 @@ body {
 }
 
 .quote-options {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr;
   margin: 0 0 14px;
 }
 
 .quote-radiogroup {
-  display: contents;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 .quote-option--hdz { grid-column: 1; grid-row: 1; }
