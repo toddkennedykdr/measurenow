@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { getBuildingInsights, calculateWallArea } from '../services/solar';
+import { requireAuth, dailyCap, deepEscape } from '../middleware/security';
 
 export const inspectRouter = Router();
 
@@ -14,7 +15,8 @@ const upload = multer({
   },
 });
 
-inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Request, res: Response) => {
+// Staff only (rep inspection tool). Auth runs BEFORE multer so anonymous uploads are never buffered.
+inspectRouter.post('/analyze-photos', requireAuth, dailyCap('analyze-photos', 0, 100), upload.array('photos', 12), async (req: Request, res: Response) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length < 4) {
@@ -157,13 +159,28 @@ Use your best professional judgment for all estimates. If you cannot determine s
   }
 });
 
-inspectRouter.post('/send-report', async (req: Request, res: Response) => {
+// Allowed recipient domains for the optional rep copy (comma list; default kanddroofingnc.com).
+function repEmailAllowed(email: string): boolean {
+  const domains = (process.env.REPORT_EMAIL_DOMAINS || 'kanddroofingnc.com')
+    .split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+  const m = /^[^\s@<>]+@([^\s@<>]+)$/.exec(email.trim().toLowerCase());
+  return !!m && domains.includes(m[1]);
+}
+
+// Staff only: no longer an open relay. Rep copy limited to company domain; all caller strings HTML-escaped.
+inspectRouter.post('/send-report', requireAuth, dailyCap('send-report', 0, 100), async (req: Request, res: Response) => {
   try {
-    const { repEmail, address, roofData, quote, analysis, buildingMeasurements } = req.body;
+    const { repEmail: rawRepEmail } = req.body;
+    const { address, roofData, quote, analysis, buildingMeasurements } = deepEscape(req.body || {});
     if (!address) return res.status(400).json({ error: 'Missing report data.' });
 
     const recipients = ['todd@kanddroofingnc.com'];
-    if (repEmail) recipients.push(repEmail);
+    if (rawRepEmail) {
+      if (typeof rawRepEmail !== 'string' || !repEmailAllowed(rawRepEmail)) {
+        return res.status(400).json({ error: 'Rep email must be a company address.' });
+      }
+      recipients.push(rawRepEmail.trim());
+    }
 
     const complexityMultipliers: Record<number, number> = { 1: 1.0, 2: 1.05, 3: 1.1, 4: 1.15, 5: 1.3 };
     const mult = complexityMultipliers[analysis?.complexity?.rating || 3] || 1.1;
@@ -189,13 +206,13 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
       .map((f: any) => `<li>${f.type} (×${f.count}) — ${f.location}</li>`)
       .join('');
     const damageHtml = (analysis?.damage || [])
-      .map((d: any) => `<li><strong style="color:${d.severity === 'major' ? '#E2312B' : d.severity === 'minor' ? '#ca8a04' : '#16a34a'}">${d.severity}</strong>: ${d.type} — ${d.description} (${d.location})</li>`)
+      .map((d: any) => `<li><strong style="color:${d.severity === 'major' ? '#c62828' : d.severity === 'minor' ? '#7a5300' : '#166534'}">${d.severity}</strong>: ${d.type} — ${d.description} (${d.location})</li>`)
       .join('');
     const recsHtml = (analysis?.recommendations || [])
       .map((r: string) => `<li>${r}</li>`)
       .join('');
     const sidingDamageHtml = (analysis?.sidingDamage || [])
-      .map((d: any) => `<li><strong style="color:${d.severity === 'major' ? '#E2312B' : d.severity === 'minor' ? '#ca8a04' : '#16a34a'}">${d.severity}</strong>: ${d.type} — ${d.description} (${d.location})</li>`)
+      .map((d: any) => `<li><strong style="color:${d.severity === 'major' ? '#c62828' : d.severity === 'minor' ? '#7a5300' : '#166534'}">${d.severity}</strong>: ${d.type} — ${d.description} (${d.location})</li>`)
       .join('');
     const sidingRecsHtml = (analysis?.sidingRecommendations || [])
       .map((r: string) => `<li>${r}</li>`)
@@ -213,8 +230,8 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
     const facets = analysis?.estimatedFacets || roofData?.segments || 0;
     const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    const thStyle = 'background:#032D59;color:white;padding:8px 12px;text-align:left;font-size:12px;text-transform:uppercase';
-    const tdStyle = 'padding:8px 12px;border-bottom:1px solid #e5e7eb';
+    const thStyle = 'background:#0a1628;color:white;padding:8px 12px;text-align:left;font-size:12px;text-transform:uppercase';
+    const tdStyle = 'padding:8px 12px;border-bottom:1px solid #e3e8ef';
 
     const roofWasteRows = [0, 0.05, 0.10, 0.15, 0.20].map(pct => {
       const a = Math.round(roofArea * (1 + pct));
@@ -228,15 +245,15 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
       return `<tr><td style="${tdStyle}">${label}</td><td style="${tdStyle}">${a.toLocaleString()}</td><td style="${tdStyle}">${(a / 100).toFixed(1)}</td></tr>`;
     }).join('');
 
-    const condColor = (r: string) => r === 'poor' ? '#E2312B' : r === 'fair' ? '#ca8a04' : '#16a34a';
+    const condColor = (r: string) => r === 'poor' ? '#c62828' : r === 'fair' ? '#7a5300' : '#166534';
 
     const html = `
-      <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;color:#374151">
+      <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;color:#4a5568">
         <!-- HEADER -->
-        <div style="background:#032D59;color:white;padding:24px;border-radius:8px;margin-bottom:16px">
+        <div style="background:#0a1628;color:white;padding:24px;border-radius:8px;margin-bottom:16px;border-bottom:3px solid #f5a623">
           <div style="display:flex;justify-content:space-between;align-items:flex-start">
             <div>
-              <div style="font-size:24px;font-weight:800">K&D <span style="color:#E2312B">Roofing</span></div>
+              <div style="font-size:24px;font-weight:800">K&D Roofing</div>
               <div style="font-size:14px;opacity:0.8">Complete Property Measurements</div>
             </div>
             <div style="text-align:right">
@@ -247,19 +264,19 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
         </div>
 
         <!-- SIDING SUMMARY -->
-        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
+        <div style="background:white;border:1px solid #e3e8ef;border-radius:8px;padding:20px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <h2 style="color:#032D59;margin:0;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px">Siding Summary</h2>
+            <h2 style="color:#0a1628;margin:0;font-size:18px;border-bottom:2px solid #0a1628;padding-bottom:4px">Siding Summary</h2>
             <span style="background:${condColor(analysis?.sidingCondition?.rating || 'fair')};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${(analysis?.sidingCondition?.rating || 'N/A').toUpperCase()}</span>
           </div>
           <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
             <tr><td style="padding:6px 0;width:50%"><strong>Total Facade:</strong> ${wallArea.toLocaleString()} sq ft</td><td><strong>Openings:</strong> ${openingsArea.toLocaleString()} sq ft</td></tr>
             <tr><td style="padding:6px 0"><strong>Net Siding:</strong> ${netWallArea.toLocaleString()} sq ft</td><td><strong>Material:</strong> ${analysis?.sidingMaterial || 'N/A'}</td></tr>
           </table>
-          ${analysis?.estimatedCorners ? `<p style="font-size:13px;color:#6b7280;margin:4px 0">Corners — Inside: ${analysis.estimatedCorners.inside} · Outside: ${analysis.estimatedCorners.outside}${analysis?.estimatedTrimLength ? ` · Trim: ~${analysis.estimatedTrimLength} lin ft` : ''}</p>` : ''}
-          <p style="font-size:14px;background:#f9fafb;border-left:3px solid #d1d5db;padding:8px 12px;border-radius:4px">${analysis?.sidingCondition?.notes || ''}</p>
-          ${sidingDamageHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Siding Damage</h4><ul style="margin:0;padding-left:20px;font-size:14px">${sidingDamageHtml}</ul>` : ''}
-          <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:16px 0 6px">Waste Factor</h4>
+          ${analysis?.estimatedCorners ? `<p style="font-size:13px;color:#5b6678;margin:4px 0">Corners — Inside: ${analysis.estimatedCorners.inside} · Outside: ${analysis.estimatedCorners.outside}${analysis?.estimatedTrimLength ? ` · Trim: ~${analysis.estimatedTrimLength} lin ft` : ''}</p>` : ''}
+          <p style="font-size:14px;background:#f4f6f9;border-left:3px solid #c5cdd9;padding:8px 12px;border-radius:4px">${analysis?.sidingCondition?.notes || ''}</p>
+          ${sidingDamageHtml ? `<h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Siding Damage</h4><ul style="margin:0;padding-left:20px;font-size:14px">${sidingDamageHtml}</ul>` : ''}
+          <h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:16px 0 6px">Waste Factor</h4>
           <table style="width:100%;border-collapse:collapse;font-size:14px">
             <tr><th style="${thStyle}">Factor</th><th style="${thStyle}">Area (sq ft)</th><th style="${thStyle}">Squares</th></tr>
             ${sidingWasteRows}
@@ -267,9 +284,9 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
         </div>
 
         <!-- ROOF SUMMARY -->
-        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
+        <div style="background:white;border:1px solid #e3e8ef;border-radius:8px;padding:20px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <h2 style="color:#032D59;margin:0;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px">Roof Summary</h2>
+            <h2 style="color:#0a1628;margin:0;font-size:18px;border-bottom:2px solid #0a1628;padding-bottom:4px">Roof Summary</h2>
             <span style="background:${condColor(analysis?.overallCondition?.rating || 'fair')};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${(analysis?.overallCondition?.rating || 'N/A').toUpperCase()}</span>
           </div>
           <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
@@ -277,7 +294,7 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
             <tr><td style="padding:6px 0"><strong>Type:</strong> ${analysis?.roofType || 'N/A'}</td><td><strong>Material:</strong> ${analysis?.material?.type || 'N/A'}</td><td><strong>Pitch:</strong> ${quote?.pitchOver12 || 'N/A'}/12</td></tr>
           </table>
 
-          <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Roof Components</h4>
+          <h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Roof Components</h4>
           <table style="width:100%;border-collapse:collapse;font-size:14px">
             <tr><th style="${thStyle}">Component</th><th style="${thStyle}">Est. Length (ft)</th></tr>
             <tr><td style="${tdStyle}">Ridges / Hips</td><td style="${tdStyle}">${ridgeLen || '—'}</td></tr>
@@ -287,9 +304,9 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
             <tr><td style="${tdStyle}">Drip Edge / Perimeter</td><td style="${tdStyle}">${dripEdge || '—'}</td></tr>
           </table>
 
-          ${featuresHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Features</h4><ul style="margin:0;padding-left:20px;font-size:14px">${featuresHtml}</ul>` : ''}
+          ${featuresHtml ? `<h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Features</h4><ul style="margin:0;padding-left:20px;font-size:14px">${featuresHtml}</ul>` : ''}
 
-          <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:16px 0 6px">Waste Factor</h4>
+          <h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:16px 0 6px">Waste Factor</h4>
           <table style="width:100%;border-collapse:collapse;font-size:14px">
             <tr><th style="${thStyle}">Factor</th><th style="${thStyle}">Area (sq ft)</th><th style="${thStyle}">Squares</th></tr>
             ${roofWasteRows}
@@ -297,30 +314,30 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
         </div>
 
         <!-- AI INSPECTION NOTES -->
-        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
-          <h2 style="color:#032D59;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px;margin-bottom:12px">AI Inspection Notes</h2>
-          <div style="background:#f9fafb;padding:12px;border-radius:8px;display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div style="background:white;border:1px solid #e3e8ef;border-radius:8px;padding:20px;margin-bottom:16px">
+          <h2 style="color:#0a1628;font-size:18px;border-bottom:2px solid #0a1628;padding-bottom:4px;margin-bottom:12px">AI Inspection Notes</h2>
+          <div style="background:#f4f6f9;padding:12px;border-radius:8px;display:flex;align-items:center;gap:12px;margin-bottom:12px">
             <span style="background:${condColor(analysis?.overallCondition?.rating || 'fair')};color:white;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:700">${(analysis?.overallCondition?.rating || 'N/A').toUpperCase()}</span>
             <span style="font-size:14px">${analysis?.overallCondition?.notes || ''}</span>
           </div>
           <p style="font-size:14px"><strong>Complexity:</strong> ${analysis?.complexity?.rating || 'N/A'}/5 — ${analysis?.complexity?.explanation || ''}</p>
-          ${damageHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Damage Findings</h4><ul style="margin:0;padding-left:20px;font-size:14px">${damageHtml}</ul>` : ''}
-          ${recsHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${recsHtml}</ul>` : ''}
-          ${sidingRecsHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Siding Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${sidingRecsHtml}</ul>` : ''}
+          ${damageHtml ? `<h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Damage Findings</h4><ul style="margin:0;padding-left:20px;font-size:14px">${damageHtml}</ul>` : ''}
+          ${recsHtml ? `<h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${recsHtml}</ul>` : ''}
+          ${sidingRecsHtml ? `<h4 style="color:#0a1628;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Siding Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${sidingRecsHtml}</ul>` : ''}
         </div>
 
         <!-- QUOTE SUMMARY -->
-        <div style="background:white;border:2px solid #032D59;border-radius:8px;padding:20px;margin-bottom:16px">
-          <h2 style="color:#032D59;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px;margin-bottom:12px">Quote Summary</h2>
+        <div style="background:white;border:2px solid #0a1628;border-radius:8px;padding:20px;margin-bottom:16px">
+          <h2 style="color:#0a1628;font-size:18px;border-bottom:2px solid #0a1628;padding-bottom:4px;margin-bottom:12px">Quote Summary</h2>
           <table style="width:100%;border-collapse:collapse;font-size:16px">
-            <tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb"><strong>Roof Replacement</strong> <span style="color:#6b7280;font-size:12px">(${analysis?.material?.type || ''} · ${mult}x complexity)</span></td><td style="text-align:right;font-weight:bold;color:#032D59;border-bottom:1px solid #e5e7eb">$${adjLow.toLocaleString()} – $${adjHigh.toLocaleString()}</td></tr>
-            ${wallArea > 0 ? `<tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb"><strong>Siding</strong> <span style="color:#6b7280;font-size:12px">(${sidingLabel})</span></td><td style="text-align:right;font-weight:bold;color:#032D59;border-bottom:1px solid #e5e7eb">$${sidingLow.toLocaleString()} – $${sidingHigh.toLocaleString()}</td></tr>` : ''}
-            <tr style="border-top:2px solid #032D59"><td style="padding:14px 0;font-size:18px;font-weight:700;color:#032D59">Total Estimated</td><td style="text-align:right;font-weight:800;color:#E2312B;font-size:22px">$${(adjLow + sidingLow).toLocaleString()} – $${(adjHigh + sidingHigh).toLocaleString()}</td></tr>
+            <tr><td style="padding:10px 0;border-bottom:1px solid #e3e8ef"><strong>Roof Replacement</strong> <span style="color:#5b6678;font-size:12px">(${analysis?.material?.type || ''} · ${mult}x complexity)</span></td><td style="text-align:right;font-weight:bold;color:#0a1628;border-bottom:1px solid #e3e8ef">$${adjLow.toLocaleString()} – $${adjHigh.toLocaleString()}</td></tr>
+            ${wallArea > 0 ? `<tr><td style="padding:10px 0;border-bottom:1px solid #e3e8ef"><strong>Siding</strong> <span style="color:#5b6678;font-size:12px">(${sidingLabel})</span></td><td style="text-align:right;font-weight:bold;color:#0a1628;border-bottom:1px solid #e3e8ef">$${sidingLow.toLocaleString()} – $${sidingHigh.toLocaleString()}</td></tr>` : ''}
+            <tr style="border-top:2px solid #0a1628"><td style="padding:14px 0;font-size:18px;font-weight:700;color:#0a1628">Total Estimated</td><td style="text-align:right;font-weight:800;color:#1b5de0;font-size:22px">$${(adjLow + sidingLow).toLocaleString()} – $${(adjHigh + sidingHigh).toLocaleString()}</td></tr>
           </table>
-          <p style="font-size:12px;color:#6b7280;font-style:italic;margin:8px 0 0">*Estimates based on satellite data + AI photo analysis. Final pricing subject to on-site confirmation.</p>
+          <p style="font-size:12px;color:#5b6678;font-style:italic;margin:8px 0 0">*Estimates based on satellite data + AI photo analysis. Final pricing subject to on-site confirmation.</p>
         </div>
 
-        <p style="color:#6b7280;font-size:12px;text-align:center">Generated by K&D Roofing MeasureNow Inspection Tool · ${reportDate}</p>
+        <p style="color:#5b6678;font-size:12px;text-align:center">Generated by K&D Roofing MeasureNow Inspection Tool · ${reportDate}</p>
       </div>
     `;
 
@@ -333,7 +350,7 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
       body: JSON.stringify({
         from: 'K&D Roofing <admin@kanddroofingnc.com>',
         to: recipients,
-        subject: `Roof & Siding Inspection — ${address}`,
+        subject: `Roof & Siding Inspection — ${String(req.body.address).slice(0, 200)}`,
         html,
       }),
     });

@@ -1,9 +1,43 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { FullQuoteData } from '../types';
+import { KD_CALL, QUOTE_DISCLAIMER } from '../quoteChrome';
+import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../quoteIncludes';
 
 interface Props {
   data: FullQuoteData;
   onLeadSubmitted: (name: string) => void;
+}
+
+type ShingleOption = 'hdz' | 'uhdz';
+
+function QuotePanel({ tier, selected }: { tier: ShingleOption; selected: boolean }) {
+  return (
+    <div className={selected ? `quote-panel quote-panel--${tier} quote-panel--selected` : `quote-panel quote-panel--${tier}`}>
+      <div className="quote-warranty">
+        <p className="quote-warranty__line">
+          <strong className="quote-warranty__label">{`${QUOTE_WARRANTY.label} `}</strong>
+          {QUOTE_WARRANTY.goldenPledge[tier]}
+        </p>
+        <p className="quote-warranty__line">{QUOTE_WARRANTY.wind}</p>
+        <p className="quote-warranty__line">{QUOTE_WARRANTY.algae[tier]}</p>
+      </div>
+      <div className="quote-material">
+        <div className="quote-material__title">What's included</div>
+        <ul className="quote-material__list">
+          {QUOTE_INCLUDES.map((item) => (
+            <li key={item.text}>
+              {item.href && item.linkText ? (
+                <>
+                  {`${item.text} `}
+                  <a href={item.href} target="_blank" rel="noopener noreferrer">{item.linkText}</a>
+                </>
+              ) : item.text}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 export function QuoteResult({ data, onLeadSubmitted }: Props) {
@@ -12,11 +46,65 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Display-only. The lead still sends both HDZ and UHDZ totals.
+  const [option, setOption] = useState<ShingleOption>('hdz');
+  const [wide, setWide] = useState(false);
+  const optionRefs = useRef<Record<ShingleOption, HTMLButtonElement | null>>({ hdz: null, uhdz: null });
+  const boardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const apply = () => setWide(el.clientWidth >= 560);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  function onOptionsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target.getAttribute('role') !== 'radio') return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    const next: ShingleOption = option === 'hdz' ? 'uhdz' : 'hdz';
+    setOption(next);
+    optionRefs.current[next]?.focus();
+  }
 
   const { quote, roofData, address } = data;
 
   const formatPrice = (n: number) =>
     n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+
+  function shingleRadio(tier: ShingleOption) {
+    const selected = option === tier;
+    const name = tier === 'hdz' ? 'GAF Timberline HDZ' : 'GAF Timberline UHDZ';
+    const total = tier === 'hdz' ? quote.hdzEstimate : quote.uhdzEstimate;
+    const rate = tier === 'hdz'
+      ? `$${quote.hdzPricePerSquare}/sq`
+      : `+$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq)`;
+    return (
+      <button
+        key={`${tier}-radio`}
+        id={`shingle-${tier}`}
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        tabIndex={selected ? 0 : -1}
+        ref={(node) => { optionRefs.current[tier] = node; }}
+        className={selected ? `quote-option quote-option--${tier} quote-option--selected` : `quote-option quote-option--${tier}`}
+        onClick={() => setOption(tier)}
+      >
+        <span className={selected ? 'quote-option__mark quote-option__mark--on' : 'quote-option__mark'}>
+          {selected ? 'Selected' : 'Select'}
+        </span>
+        <span className="quote-option__name">{name}</span>
+        <span className="quote-result__price">{formatPrice(total)}</span>
+        <span className={tier === 'uhdz' ? 'quote-option__rate quote-result__upgrade' : 'quote-option__rate'}>{rate}</span>
+      </button>
+    );
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -37,8 +125,8 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           email: email.trim(),
           phone: phone.trim(),
           address,
-          quoteLow: quote.lowEstimate,
-          quoteHigh: quote.highEstimate,
+          quoteLow: quote.hdzEstimate,
+          quoteHigh: quote.uhdzEstimate,
           roofSqFt: roofData.totalAreaSqFt,
           roofSquares: quote.roofSquares,
           avgPitchDegrees: quote.avgPitchDegrees,
@@ -63,14 +151,9 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
   return (
     <div className="card">
       <div className="quote-result">
-        <p className="quote-result__address">📍 {address}</p>
+        <p className="quote-result__address">{address}</p>
 
-        <div className="quote-result__price">
-          {formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}
-        </div>
-        <p className="quote-result__price-label">Estimated roof replacement cost</p>
-
-        <div className="quote-stats">
+        <div className="quote-stats" role="group" aria-label="Roof measurement">
           <div className="quote-stat">
             <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
             <span className="quote-stat__label">Sq Ft</span>
@@ -85,9 +168,40 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           </div>
         </div>
 
-        <div className="quote-material">
-          <strong>Includes:</strong> {quote.materialNote}
+        <h2 id="shingle-options-label" className="quote-result__heading">Shingle options</h2>
+        <div className="quote-options" ref={boardRef} onKeyDown={onOptionsKeyDown}>
+          <div
+            className="quote-radiogroup"
+            role="radiogroup"
+            aria-labelledby="shingle-options-label"
+            aria-owns="shingle-hdz shingle-uhdz"
+          />
+          {wide ? (
+            <>
+              {shingleRadio('hdz')}
+              {shingleRadio('uhdz')}
+              <QuotePanel key="hdz-panel" tier="hdz" selected={option === 'hdz'} />
+              <QuotePanel key="uhdz-panel" tier="uhdz" selected={option === 'uhdz'} />
+            </>
+          ) : (
+            <>
+              {shingleRadio('hdz')}
+              <QuotePanel key="hdz-panel" tier="hdz" selected={option === 'hdz'} />
+              {shingleRadio('uhdz')}
+              <QuotePanel key="uhdz-panel" tier="uhdz" selected={option === 'uhdz'} />
+            </>
+          )}
         </div>
+
+        <p className="quote-elite">{GAF_MASTER_ELITE_LABEL}</p>
+        <p className="quote-elite__id">{`Contractor ID ${GAF_CONTRACTOR_ID}`}</p>
+
+        <p className="quote-result__disclaimer">{QUOTE_DISCLAIMER}</p>
+        <a className="quote-result__call" href={KD_CALL.href} aria-label={KD_CALL.label}>
+          <span className="quote-result__call-label">Call K&D Roofing:</span>
+          <span className="quote-result__call-number">(919) 977-4074</span>
+        </a>
+
       </div>
 
       <div className="divider" />
@@ -132,7 +246,7 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
             id="phone"
             type="tel"
             className="input"
-            placeholder="(919) 555-1234"
+            placeholder="Your phone number"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             disabled={loading}

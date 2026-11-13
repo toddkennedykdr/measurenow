@@ -33,9 +33,10 @@ interface Props {
   analysis: Analysis | null;
 }
 
-const NAVY = '#032D59';
-const LIGHT = '#E8EDF3';
-const SHADES = ['#032D59', '#0A4A8A', '#1565B0', '#2080D0', '#3A9BE0', '#5BB5F0', '#7CCBFF', '#A0DDFF'];
+const NAVY = '#0a1628';
+const BLUE = '#1b5de0';
+const LIGHT = '#e8effc';
+const SHADES = ['#1248b0', '#1b5de0', '#4d82e6', '#7aa6ee', '#a8c6f5', '#d4e3fb', '#e8effc', '#132744'];
 
 function getSegmentShade(i: number) {
   return SHADES[i % SHADES.length];
@@ -118,7 +119,7 @@ export function RoofDiagram({ roofData, analysis }: Props) {
         <h4 style={{ color: NAVY, marginBottom: 8, fontSize: 14 }}>Roof Plan (Bird's Eye View)</h4>
         <svg viewBox={`0 0 ${planW} ${planH}`} width="100%" style={{ maxWidth: 500, display: 'block', margin: '0 auto' }}>
           {/* Footprint outline */}
-          <rect x={ox} y={oy} width={rw} height={rh} fill="none" stroke={NAVY} strokeWidth={1} strokeDasharray="4,2" />
+          <rect x={ox} y={oy} width={rw} height={rh} fill="none" stroke={BLUE} strokeWidth={1.5} strokeDasharray="4,2" />
 
           {/* Facet polygons */}
           {planSegments.map((f, i) => {
@@ -129,7 +130,7 @@ export function RoofDiagram({ roofData, analysis }: Props) {
             };
             return (
               <g key={i}>
-                <polygon points={pts} fill={getSegmentShade(i)} fillOpacity={0.35} stroke={NAVY} strokeWidth={1.5} />
+                <polygon points={pts} fill={getSegmentShade(i)} fillOpacity={0.35} stroke={BLUE} strokeWidth={1.5} />
                 <text x={centroid.x} y={centroid.y - 6} textAnchor="middle" fontSize={10} fill={NAVY} fontWeight="bold">
                   {f.seg.areaSqFt.toLocaleString()} sf
                 </text>
@@ -141,7 +142,7 @@ export function RoofDiagram({ roofData, analysis }: Props) {
           })}
 
           {/* Ridge line */}
-          <line x1={ridgeL.x} y1={ridgeL.y} x2={ridgeR.x} y2={ridgeR.y} stroke={NAVY} strokeWidth={2.5} />
+          <line x1={ridgeL.x} y1={ridgeL.y} x2={ridgeR.x} y2={ridgeR.y} stroke={BLUE} strokeWidth={3} />
           <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill={NAVY} fontStyle="italic">ridge</text>
 
           {/* Dimension labels */}
@@ -177,7 +178,7 @@ export function RoofDiagram({ roofData, analysis }: Props) {
           const winH = eh * 0.18;
 
           return (
-            <svg key={i} viewBox={`0 0 ${elevW} ${elevH}`} width="100%" style={{ border: `1px solid ${LIGHT}`, borderRadius: 6, background: '#FAFBFD' }}>
+            <svg key={i} viewBox={`0 0 ${elevW} ${elevH}`} width="100%" style={{ border: `1px solid ${LIGHT}`, borderRadius: 6, background: '#f4f6f9' }}>
               {/* Wall */}
               <rect x={eox} y={topY} width={ew} height={eh} fill={LIGHT} stroke={NAVY} strokeWidth={1.5} />
 

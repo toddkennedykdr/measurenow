@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
+import { conditionColor } from '../statusColors';
 
 interface Report {
   id: number;
@@ -11,26 +12,11 @@ interface Report {
   roofData: any;
 }
 
-function conditionColor(c: string) {
-  if (c === 'poor') return '#E2312B';
-  if (c === 'fair') return '#ca8a04';
-  return '#16a34a';
-}
-
 export default function DashboardPage() {
   const [reports, setReports] = useState<Report[]>([]);
-  const [allReports, setAllReports] = useState<(Report & { userName?: string; username?: string })[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [tab, setTab] = useState<'mine' | 'all'>('mine');
 
   useEffect(() => {
-    // Check if admin
-    fetch('/api/auth/me', { credentials: 'include' })
-      .then(r => r.json())
-      .then(u => { if (u.isAdmin) setIsAdmin(true); })
-      .catch(() => {});
-
     fetch('/api/reports', { credentials: 'include' })
       .then(r => r.json())
       .then(setReports)
@@ -38,124 +24,55 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (isAdmin && tab === 'all' && allReports.length === 0) {
-      fetch('/api/reports/admin/all', { credentials: 'include' })
-        .then(r => r.json())
-        .then(setAllReports)
-        .catch(console.error);
-    }
-  }, [isAdmin, tab]);
-
   return (
+    <>
+    <NavBar />
     <div className="inspect-page">
-      <NavBar />
       <header className="inspect-header" style={{ paddingBottom: 8 }}>
-        <div className="inspect-header__top">
-          <div className="header__logo">K&amp;D <span>Roofing</span></div>
-        </div>
         <div className="inspect-header__title" style={{ fontSize: 20 }}>Dashboard</div>
       </header>
 
-      {/* Action Cards */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-        gap: 16,
-        padding: '0 16px 24px',
-      }}>
-        <Link to="/quote" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div style={{
-            background: 'linear-gradient(135deg, #032D59 0%, #064a8a 100%)',
-            borderRadius: 12,
-            padding: '32px 24px',
-            color: 'white',
-            cursor: 'pointer',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-            textAlign: 'center',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(3,45,89,0.3)'; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
-          >
-            <div style={{ fontSize: 40, marginBottom: 12 }}>⚡</div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Instant Quote</div>
-            <div style={{ fontSize: 13, opacity: 0.8 }}>Get a roof replacement estimate in seconds</div>
-          </div>
+      <div className="action-grid">
+        <Link to="/quote" className="action-card action-card--navy">
+          <div className="action-card__icon">⚡</div>
+          <div className="action-card__title">Instant Quote</div>
+          <div className="action-card__text">Get a roof replacement estimate in seconds</div>
         </Link>
 
-        <Link to="/inspect" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div style={{
-            background: 'linear-gradient(135deg, #E2312B 0%, #ff5c54 100%)',
-            borderRadius: 12,
-            padding: '32px 24px',
-            color: 'white',
-            cursor: 'pointer',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-            textAlign: 'center',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(226,49,43,0.3)'; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
-          >
-            <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Inspection Tool</div>
-            <div style={{ fontSize: 13, opacity: 0.8 }}>Run a full AI-powered roof inspection</div>
-          </div>
+        <Link to="/inspect" className="action-card action-card--blue">
+          <div className="action-card__icon">🔍</div>
+          <div className="action-card__title">Inspection Tool</div>
+          <div className="action-card__text">Run a full AI-powered roof inspection</div>
         </Link>
       </div>
 
       {/* My Reports */}
-      <div style={{ padding: '0 16px 24px' }}>
-        {isAdmin && (
-          <div style={{
-            display: 'flex',
-            gap: 0,
-            marginBottom: 16,
-            borderRadius: 8,
-            overflow: 'hidden',
-            border: '2px solid #032D59',
-          }}>
-            <button onClick={() => setTab('mine')} style={{
-              flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer',
-              fontWeight: 700, fontSize: 14,
-              background: tab === 'mine' ? '#032D59' : 'white',
-              color: tab === 'mine' ? 'white' : '#032D59',
-            }}>📋 My Reports ({reports.length})</button>
-            <button onClick={() => setTab('all')} style={{
-              flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer',
-              fontWeight: 700, fontSize: 14,
-              background: tab === 'all' ? '#032D59' : 'white',
-              color: tab === 'all' ? 'white' : '#032D59',
-            }}>👥 All Reports ({allReports.length})</button>
-          </div>
-        )}
-
-        {!isAdmin && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            marginBottom: 16,
-          }}>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#032D59' }}>📋 My Reports</h2>
-            {!loading && (
-              <span style={{
-                background: '#e5e7eb',
-                color: '#374151',
-                padding: '2px 10px',
-                borderRadius: 12,
-                fontSize: 12,
-                fontWeight: 600,
-              }}>{reports.length}</span>
-            )}
-          </div>
-        )}
+      <div style={{ padding: '0 0 24px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 16,
+        }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--navy)' }}>📋 My Reports</h2>
+          {!loading && (
+            <span style={{
+              background: '#e6eaf1',
+              color: 'var(--navy)',
+              padding: '2px 10px',
+              borderRadius: 12,
+              fontSize: 12,
+              fontWeight: 600,
+            }}>{reports.length}</span>
+          )}
+        </div>
 
         {loading ? (
-          <div className="card" style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>Loading reports...</div>
-        ) : (tab === 'mine' ? reports : allReports).length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading reports...</div>
+        ) : reports.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: 48 }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📄</div>
-            <p style={{ fontSize: 16, color: '#6b7280', margin: '0 0 16px' }}>No reports yet. Run your first inspection!</p>
+            <p style={{ fontSize: 16, color: 'var(--muted)', margin: '0 0 16px' }}>No reports yet. Run your first inspection!</p>
             <Link to="/inspect" className="btn btn--primary" style={{ display: 'inline-block', textDecoration: 'none' }}>
               🔍 Start Inspection
             </Link>
@@ -166,7 +83,7 @@ export default function DashboardPage() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
             gap: 12,
           }}>
-            {(tab === 'mine' ? reports : allReports).map(r => {
+            {reports.map(r => {
               const analysis = typeof r.analysis === 'string' ? JSON.parse(r.analysis) : r.analysis;
               const condition = analysis?.overallCondition?.rating || 'N/A';
               const date = new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -182,7 +99,7 @@ export default function DashboardPage() {
                     onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: '#032D59', lineHeight: 1.3 }}>{displayName}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy)', lineHeight: 1.3 }}>{displayName}</div>
                       <span style={{
                         background: conditionColor(condition),
                         color: 'white',
@@ -196,16 +113,9 @@ export default function DashboardPage() {
                       }}>{condition}</span>
                     </div>
                     {r.customerName && (
-                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{r.address}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 2 }}>{r.address}</div>
                     )}
-                    {tab === 'all' && (r as any).userName && (
-                      <div style={{
-                        fontSize: 11, color: '#032D59', fontWeight: 600,
-                        background: '#e0e7ff', padding: '1px 8px', borderRadius: 8,
-                        display: 'inline-block', marginBottom: 2,
-                      }}>👤 {(r as any).userName}</div>
-                    )}
-                    <div style={{ fontSize: 12, color: '#9ca3af' }}>{date}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>{date}</div>
                   </div>
                 </Link>
               );
@@ -220,5 +130,6 @@ export default function DashboardPage() {
         · Licensed &amp; Insured
       </footer>
     </div>
+    </>
   );
 }
