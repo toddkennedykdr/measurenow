@@ -10,33 +10,9 @@ interface Props {
 
 type ShingleOption = 'hdz' | 'uhdz';
 
-const QUOTE_PHOTOS = {
-  hdz: {
-    src: '/images/gaf-timberline-hdz.webp',
-    alt: 'Roof with GAF Timberline HDZ shingles',
-    width: 800,
-    height: 533,
-  },
-  uhdz: {
-    src: '/images/gaf-timberline-uhdz.webp',
-    alt: 'Roof with GAF Timberline UHDZ shingles',
-    width: 800,
-    height: 533,
-  },
-} as const;
-
 function QuotePanel({ tier, selected }: { tier: ShingleOption; selected: boolean }) {
-  const photo = QUOTE_PHOTOS[tier];
   return (
     <div className={selected ? `quote-panel quote-panel--${tier} quote-panel--selected` : `quote-panel quote-panel--${tier}`}>
-      <img
-        className="quote-photo"
-        src={photo.src}
-        alt={photo.alt}
-        width={photo.width}
-        height={photo.height}
-        loading="lazy"
-      />
       <div className="quote-warranty">
         <p className="quote-warranty__line">
           <strong className="quote-warranty__label">{`${QUOTE_WARRANTY.label} `}</strong>

@@ -190,16 +190,9 @@ check(
     && countText(result, 'rel="noopener noreferrer"') === 2
     && countText(result, 'Click here to apply') === 2,
 );
-const roofImgs = [...result.matchAll(/<img\b[^>]*>/g)].map((match) => match[0]);
 check(
-  'result screen images are only the two roof photos',
-  roofImgs.length === 2
-    && roofImgs.every((tag) => (
-      tag.includes('src="/images/gaf-timberline-hdz.webp"')
-      || tag.includes('src="/images/gaf-timberline-uhdz.webp"')
-    ))
-    && roofImgs.every((tag) => !/logo/i.test(tag))
-    && roofImgs.every((tag) => tag.includes('width="800"') && tag.includes('height="533"')),
+  'quote screen renders no images',
+  !/<img\b/i.test(result),
 );
 check(
   'quote result names GAF Master Elite in plain text',

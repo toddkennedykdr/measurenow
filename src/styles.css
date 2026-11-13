@@ -539,7 +539,7 @@ body {
 
 .quote-panel {
   min-width: 0;
-  padding: 0 12px 12px;
+  padding: 10px 12px 12px;
   border: 2px solid var(--field-border);
   border-top: none;
   border-radius: 0 0 14px 14px;
@@ -551,15 +551,6 @@ body {
 .quote-panel--selected {
   border-color: var(--navy);
   background: var(--tint);
-}
-
-.quote-photo {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  height: auto;
-  margin: 0 0 10px;
-  border-radius: 10px;
 }
 
 .quote-option__mark {
