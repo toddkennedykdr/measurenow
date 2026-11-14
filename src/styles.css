@@ -553,6 +553,27 @@ body {
   background: var(--tint);
 }
 
+.quote-photo {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin: 0 0 10px;
+  border-radius: 10px;
+}
+
+.quote-result__restart {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.field-error {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .quote-option__mark {
   display: inline-flex;
   align-items: center;

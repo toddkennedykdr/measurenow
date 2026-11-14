@@ -35,4 +35,4 @@ export interface FullQuoteData extends QuoteResponse {
   address: string;
 }
 
-export type Step = 'address' | 'confirm' | 'quote' | 'thankyou';
+export type Step = 'address' | 'confirm' | 'gate' | 'quote' | 'thankyou';

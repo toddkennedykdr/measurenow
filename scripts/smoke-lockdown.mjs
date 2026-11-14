@@ -74,7 +74,9 @@ try {
   // 4. Public quote path still works (stubbed upstream), non-401
   r = await jpost('/api/roof/quote', { lat: 35.78, lng: -78.64 }, { Origin: PROD, 'X-Forwarded-For': '203.0.113.50' });
   const q = await r.json().catch(() => ({}));
-  check('POST /api/roof/quote public -> 200', r.status === 200 && q?.quote?.roofSquares > 0, `got ${r.status} squares=${q?.quote?.roofSquares}`);
+  const preGateLeak = ['roofSquares', 'pitchOver12', 'pitchCategory', 'avgPitchDegrees', 'totalAreaSqFt', 'footprintSqFt', 'hdzEstimate', 'uhdzEstimate', 'hdzPricePerSquare', 'lowEstimate', 'highEstimate', 'quoteLow', 'quoteHigh'];
+  const preGateBlob = JSON.stringify(q);
+  check('POST /api/roof/quote public -> 200', r.status === 200 && typeof q?.quoteId === 'string' && q.quoteId.length >= 16 && preGateLeak.every((key) => !Object.prototype.hasOwnProperty.call(q, key) && !preGateBlob.includes(`"${key}"`)), `got ${r.status}`);
   r = await req('/api/roof/maps-key'); check('GET /api/roof/maps-key stays public -> 200', r.status === 200, `got ${r.status}`);
 
   // 5. Daily cap (CAP_GEOCODE_PUBLIC=3): 4th call from different IPs -> 429
