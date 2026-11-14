@@ -45,6 +45,16 @@ try {
   check('accept-invite bad token -> 400 without a database', invite.status === 400, `got ${invite.status}`);
   invite = await jpost('/api/auth/accept-invite', { token: 'a'.repeat(32), password: 'short' }, { 'X-Forwarded-For': '198.51.100.42' });
   check('accept-invite short password -> 400', invite.status === 400, `got ${invite.status}`);
+  let reset = await jpost('/api/auth/reset-password', { token: 'not-a-token', password: 'long-enough-pw' }, { 'X-Forwarded-For': '198.51.100.70' });
+  const resetBody = await reset.json();
+  check('reset-password bad token -> 400 without a database', reset.status === 400, `got ${reset.status}`);
+  check('reset-password bad token is generic', resetBody.error === 'This reset link is invalid or has expired', resetBody.error);
+  reset = await jpost('/api/auth/reset-password', { token: 'a'.repeat(43), password: 'short' }, { 'X-Forwarded-For': '198.51.100.71' });
+  check('reset-password short password -> 400', reset.status === 400, `got ${reset.status}`);
+  const change = await jpost('/api/auth/change-password', { currentPassword: 'anything', password: 'long-enough-pw' }, { 'X-Forwarded-For': '198.51.100.72' });
+  check('change-password anonymous -> 401', change.status === 401, `got ${change.status}`);
+  const resetGet = await req('/api/auth/reset-password/not-a-token', { headers: { 'X-Forwarded-For': '198.51.100.73' } });
+  check('GET reset-password bad token -> 400', resetGet.status === 400, `got ${resetGet.status}`);
 
   // 2. Unknown /api -> JSON 404; non-API path -> SPA 200
   let r = await req('/api/reports/admin/all/x'); // nonexistent
@@ -64,7 +74,9 @@ try {
   // 4. Public quote path still works (stubbed upstream), non-401
   r = await jpost('/api/roof/quote', { lat: 35.78, lng: -78.64 }, { Origin: PROD, 'X-Forwarded-For': '203.0.113.50' });
   const q = await r.json().catch(() => ({}));
-  check('POST /api/roof/quote public -> 200', r.status === 200 && q?.quote?.roofSquares > 0, `got ${r.status} squares=${q?.quote?.roofSquares}`);
+  const preGateLeak = ['roofSquares', 'pitchOver12', 'pitchCategory', 'avgPitchDegrees', 'totalAreaSqFt', 'footprintSqFt', 'hdzEstimate', 'uhdzEstimate', 'hdzPricePerSquare', 'lowEstimate', 'highEstimate', 'quoteLow', 'quoteHigh'];
+  const preGateBlob = JSON.stringify(q);
+  check('POST /api/roof/quote public -> 200', r.status === 200 && typeof q?.quoteId === 'string' && q.quoteId.length >= 16 && preGateLeak.every((key) => !Object.prototype.hasOwnProperty.call(q, key) && !preGateBlob.includes(`"${key}"`)), `got ${r.status}`);
   r = await req('/api/roof/maps-key'); check('GET /api/roof/maps-key stays public -> 200', r.status === 200, `got ${r.status}`);
 
   // 5. Daily cap (CAP_GEOCODE_PUBLIC=3): 4th call from different IPs -> 429

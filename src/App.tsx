@@ -6,8 +6,41 @@ import { isFramedWindow, notifyParentHeight, notifyParentLeadSubmitted, quotePag
 import type { GeocodeResponse, FullQuoteData, Step } from './types';
 import { AddressForm } from './components/AddressForm';
 import { ConfirmAddress } from './components/ConfirmAddress';
+import { QuoteGate } from './components/QuoteGate';
 import { QuoteResult } from './components/QuoteResult';
-import { ThankYou } from './components/ThankYou';
+
+const QUOTE_TOKEN_KEY = 'measurenow.quoteAccess';
+
+type GateDraft = {
+  quoteId: string;
+  address: string;
+};
+
+function readStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(QUOTE_TOKEN_KEY);
+    if (!raw) return null;
+    const token = JSON.parse(raw).token;
+    return typeof token === 'string' && token ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeToken(token: string) {
+  sessionStorage.setItem(QUOTE_TOKEN_KEY, JSON.stringify({ token }));
+}
+
+function quoteFromPayload(data: FullQuoteData & { token?: string; leadCreated?: boolean }): FullQuoteData {
+  return {
+    address: data.address,
+    lat: data.lat,
+    lng: data.lng,
+    roofData: data.roofData,
+    quote: data.quote,
+  };
+}
 
 export default function App() {
   const location = useLocation();
@@ -19,8 +52,10 @@ export default function App() {
   });
   const [step, setStep] = useState<Step>('address');
   const [geocodeData, setGeocodeData] = useState<GeocodeResponse | null>(null);
+  const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
   const [quoteData, setQuoteData] = useState<FullQuoteData | null>(null);
-  const [leadName, setLeadName] = useState('');
+  const [gateError, setGateError] = useState('');
+  const [gateSubmitting, setGateSubmitting] = useState(false);
 
   const handleGeocoded = (data: GeocodeResponse) => {
     setGeocodeData(data);
@@ -28,7 +63,6 @@ export default function App() {
   };
 
   const handleLocationConfirmed = async (lat: number, lng: number) => {
-    // Call quote API with confirmed coordinates
     const res = await fetch('/api/roof/quote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -36,28 +70,82 @@ export default function App() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to get quote');
-    setQuoteData({ ...data, address: geocodeData!.address });
-    setStep('quote');
+    if (!data.quoteId || !geocodeData) throw new Error(data.error || 'Failed to get quote');
+    setGateDraft({ quoteId: data.quoteId, address: geocodeData.address });
+    setGateError('');
+    setStep('gate');
   };
 
   const handleNotMyHome = () => {
     setStep('address');
     setGeocodeData(null);
+    setGateDraft(null);
     setQuoteData(null);
   };
 
-  const handleLeadSubmitted = (name: string) => {
-    notifyParentLeadSubmitted();
-    setLeadName(name);
-    setStep('thankyou');
+  const handleGateSubmit = async (fields: { name: string; email: string; phone: string; address: string }) => {
+    if (!gateDraft) return;
+    setGateSubmitting(true);
+    setGateError('');
+    try {
+      const res = await fetch('/api/roof/quote-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quoteId: gateDraft.quoteId, ...fields }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGateError(data.error || 'Something went wrong.');
+        return;
+      }
+      if (typeof data.token === 'string') storeToken(data.token);
+      setQuoteData(quoteFromPayload(data));
+      if (data.leadCreated) notifyParentLeadSubmitted();
+      setStep('quote');
+    } catch {
+      setGateError('Network error. Please try again.');
+    } finally {
+      setGateSubmitting(false);
+    }
   };
 
   const handleStartOver = () => {
+    sessionStorage.removeItem(QUOTE_TOKEN_KEY);
     setStep('address');
     setGeocodeData(null);
+    setGateDraft(null);
     setQuoteData(null);
-    setLeadName('');
+    setGateError('');
   };
+
+  useEffect(() => {
+    const token = readStoredToken();
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/roof/quote-reveal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok || !data?.quote) {
+          sessionStorage.removeItem(QUOTE_TOKEN_KEY);
+          return;
+        }
+        if (typeof data.token === 'string') storeToken(data.token);
+        setQuoteData(quoteFromPayload(data));
+        setStep('quote');
+      } catch {
+        if (!cancelled) sessionStorage.removeItem(QUOTE_TOKEN_KEY);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isFramedWindow()) return;
@@ -103,12 +191,17 @@ export default function App() {
         />
       )}
 
-      {step === 'quote' && quoteData && (
-        <QuoteResult data={quoteData} onLeadSubmitted={handleLeadSubmitted} />
+      {step === 'gate' && gateDraft && (
+        <QuoteGate
+          address={gateDraft.address}
+          submitting={gateSubmitting}
+          serverError={gateError}
+          onSubmit={handleGateSubmit}
+        />
       )}
 
-      {step === 'thankyou' && quoteData && (
-        <ThankYou name={leadName} data={quoteData} onStartOver={handleStartOver} />
+      {step === 'quote' && quoteData && (
+        <QuoteResult data={quoteData} onStartOver={handleStartOver} />
       )}
 
       <footer className="footer">
