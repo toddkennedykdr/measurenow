@@ -208,8 +208,8 @@ check(
     && quoteImgs.every((tag) => tag.includes('loading="lazy"'))
     && quoteImgs.every((tag) => tag.includes('width="800"') && tag.includes('height="315"'))
     && quoteImgs.every((tag) => !/logo/i.test(tag))
-    && result.includes('alt="GAF Timberline HDZ shingles"')
-    && result.includes('alt="GAF Timberline UHDZ shingles"'),
+    && result.includes('alt="Home roof with GAF Timberline HDZ shingles"')
+    && result.includes('alt="Home roof with GAF Timberline UHDZ shingles"'),
   quoteImgs.join(' | '),
 );
 const quoteImageDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/images');

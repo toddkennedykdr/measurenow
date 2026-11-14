@@ -11,13 +11,13 @@ interface Props {
 const QUOTE_PHOTOS = {
   hdz: {
     src: '/images/gaf-timberline-hdz.webp',
-    alt: 'GAF Timberline HDZ shingles',
+    alt: 'Home roof with GAF Timberline HDZ shingles',
     width: 800,
     height: 315,
   },
   uhdz: {
     src: '/images/gaf-timberline-uhdz.webp',
-    alt: 'GAF Timberline UHDZ shingles',
+    alt: 'Home roof with GAF Timberline UHDZ shingles',
     width: 800,
     height: 315,
   },
