@@ -1,4 +1,4 @@
-import { Router, Request, Response, RequestHandler } from 'express';
+import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { dailyCap, perIpLimit } from '../middleware/security';
 import {
@@ -26,13 +26,12 @@ function noStore(res: Response) {
 
 /**
  * Price reveal and the contact gate. Lead delivery stays on POST /api/lead/capture.
- * quoteIpLimit / quoteCap are the same middleware instances as POST /api/roof/quote.
- * The gate also uses the lead route's 5/hour and 50/day budgets, enforced again here.
+ * These routes reuse a quote that POST /api/roof/quote already paid for, so they do
+ * not spend the quote IP limit or the daily quote cap. A fresh paid lookup is only
+ * POST /api/roof/quote. The gate keeps its own 5/hour and 50/day submit budget.
+ * /api/lead/capture keeps its own 5/hour and 50/day lead budget.
  */
-export function mountQuoteGate(
-  router: Router,
-  limits: { quoteIpLimit: RequestHandler; quoteCap: RequestHandler },
-) {
+export function mountQuoteGate(router: Router) {
   const gateIpLimit = perIpLimit('quote-gate', 60 * 60_000, 5);
   const gateDailyCap = dailyCap('quote-gate', 50, 50);
 
@@ -40,8 +39,6 @@ export function mountQuoteGate(
     '/quote-lead',
     gateIpLimit,
     gateDailyCap,
-    limits.quoteIpLimit,
-    limits.quoteCap,
     async (req: Request, res: Response) => {
       noStore(res);
       const parsed = gateSchema.safeParse(req.body);
@@ -76,8 +73,6 @@ export function mountQuoteGate(
 
   router.post(
     '/quote-reveal',
-    limits.quoteIpLimit,
-    limits.quoteCap,
     (req: Request, res: Response) => {
       noStore(res);
       const parsed = verifyQuoteToken(req.body?.token);

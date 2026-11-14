@@ -119,4 +119,4 @@ roofRouter.post('/quote', quoteIpLimit, quoteCap, async (req: Request, res: Resp
   }
 });
 
-mountQuoteGate(roofRouter, { quoteIpLimit, quoteCap });
+mountQuoteGate(roofRouter);

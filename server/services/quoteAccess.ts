@@ -163,27 +163,13 @@ export function toLeadPayload(session: Session, contact: ContactInput): LeadPayl
   };
 }
 
-/** Pre-gate body: progress only. No package prices and no total/price/cost/amount keys. */
+/**
+ * Pre-gate body. The gate screen only needs the session id.
+ * Squares, pitch, area, and prices stay on the server until the lead is accepted.
+ */
 export function progressBody(session: Session) {
   return {
     quoteId: session.id,
-    lat: session.lat,
-    lng: session.lng,
-    roofData: {
-      segments: session.roof.segments,
-      avgPitchDegrees: session.roof.avgPitchDegrees,
-      imageryQuality: session.roof.imageryQuality,
-      footprintSqFt: session.roof.footprintSqFt,
-      estimatedPerimeterFt: session.roof.estimatedPerimeterFt,
-      estimatedLength: session.roof.estimatedLength,
-      estimatedWidth: session.roof.estimatedWidth,
-    },
-    quote: {
-      roofSquares: session.quote.roofSquares,
-      avgPitchDegrees: session.quote.avgPitchDegrees,
-      pitchOver12: session.quote.pitchOver12,
-      pitchCategory: session.quote.pitchCategory,
-    },
   };
 }
 

@@ -77,6 +77,22 @@ function containsNumber(value, target) {
   return false;
 }
 
+const MEASURE_KEY = /square|pitch|sqft|sqFt|price|total|cost|amount|estimate|waste/i;
+
+function measureKeys(value, found = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => measureKeys(item, found));
+    return found;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      if (MEASURE_KEY.test(key)) found.push(key);
+      measureKeys(child, found);
+    }
+  }
+  return found;
+}
+
 const req = (p, options = {}) => fetch(BASE + p, options);
 const jpost = (p, body, headers = {}) => req(p, {
   method: 'POST',
@@ -174,10 +190,18 @@ try {
 
   const quoted = await jpost('/api/roof/quote', { lat: 35.78, lng: -78.64 }, { 'X-Forwarded-For': '198.51.100.22' });
   const progress = await quoted.json();
-  check('pre-gate quote is 200 with roof squares and a quote id', quoted.status === 200 && progress?.quote?.roofSquares > 0 && typeof progress.quoteId === 'string', `status=${quoted.status}`);
+  const preGateNumbers = [
+    ...BANNED_NUMBERS,
+    expectedQuote.roofSquares,
+    expectedQuote.pitchOver12,
+    expectedQuote.avgPitchDegrees,
+    roofSqFt,
+  ];
+  check('pre-gate quote is 200 with only a quote id', quoted.status === 200 && typeof progress.quoteId === 'string' && Object.keys(progress).join(',') === 'quoteId', `status=${quoted.status} keys=${Object.keys(progress).join(',')}`);
   check('pre-gate quote has no price keys', priceKeys(progress).length === 0, priceKeys(progress).join(','));
-  const leaked = BANNED_NUMBERS.filter((n) => containsNumber(progress, n));
-  check('pre-gate quote has no price amounts', leaked.length === 0, leaked.join(','));
+  check('pre-gate quote has no squares, pitch, or area', measureKeys(progress).length === 0, measureKeys(progress).join(','));
+  const leaked = preGateNumbers.filter((n) => containsNumber(progress, n));
+  check('pre-gate quote has no price, square, pitch, or area amounts', leaked.length === 0, leaked.join(','));
   check('pre-gate quote does not include a token', progress.token == null && progress.leadCreated == null);
 
   const earlyToken = signQuoteToken(progress.quoteId, Date.now() + 60_000);
@@ -270,12 +294,74 @@ try {
 
   const geocode = await jpost('/api/roof/geocode', { address: '1 Test St Raleigh' }, { 'X-Forwarded-For': '198.51.100.40' });
   const geocodeBody = await geocode.json();
-  check('geocode response has no price keys', geocode.status === 200 && priceKeys(geocodeBody).length === 0, priceKeys(geocodeBody).join(','));
+  check('geocode response has no squares, pitch, area, or prices', geocode.status === 200 && measureKeys(geocodeBody).length === 0, measureKeys(geocodeBody).join(','));
+  const maps = await req('/api/roof/maps-key');
+  const mapsBody = await maps.json();
+  check('maps key response has no squares, pitch, area, or prices', maps.status === 200 && measureKeys(mapsBody).length === 0, measureKeys(mapsBody).join(','));
+
+  const budgetIp = '192.0.2.77';
+  const budgetIds = [];
+  const budgetQuotes = [];
+  for (let i = 0; i < 21; i++) {
+    const res = await jpost('/api/roof/quote', { lat: 35.78, lng: -78.64 }, { 'X-Forwarded-For': budgetIp });
+    budgetQuotes.push(res.status);
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 200) budgetIds.push(body.quoteId);
+  }
+  const budgetGate = await jpost('/api/roof/quote-lead', {
+    quoteId: budgetIds[0],
+    ...contact,
+    email: 'budget@example.com',
+  }, { 'X-Forwarded-For': budgetIp });
+  check(
+    'a used quote allowance does not block the gate',
+    budgetQuotes[19] === 200 && budgetQuotes[20] === 429 && budgetGate.status === 200,
+    `quotes=${budgetQuotes[19]},${budgetQuotes[20]} gate=${budgetGate.status}`,
+  );
+  await budgetGate.json().catch(() => ({}));
+
+  const capPort = 4026;
+  const capLog = path.join('/tmp', 'quote-gate-cap-outbound.jsonl');
+  fs.writeFileSync(capLog, '');
+  const capSrv = spawn(process.execPath, ['-r', path.join(root, 'scripts/quote-gate-preload.cjs'), path.join(root, 'dist-server/index.js')], {
+    env: { ...env, PORT: String(capPort), CAP_QUOTE_PUBLIC: '2', OUTBOUND_LOG: capLog },
+    cwd: root,
+  });
+  const capBase = `http://127.0.0.1:${capPort}`;
+  const capPost = (p, body, ip) => fetch(capBase + p, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-Forwarded-For': ip },
+    body: JSON.stringify(body),
+  });
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(capBase + '/api/auth/me'); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    const firstQuote = await capPost('/api/roof/quote', { lat: 35.78, lng: -78.64 }, '198.51.100.80');
+    const firstBody = await firstQuote.json();
+    const firstGate = await capPost('/api/roof/quote-lead', { quoteId: firstBody.quoteId, ...contact, email: 'cap-a@example.com' }, '198.51.100.80');
+    const firstGateBody = await firstGate.json();
+    const reveals = [];
+    for (let i = 0; i < 5; i++) reveals.push((await capPost('/api/roof/quote-reveal', { token: firstGateBody.token }, '198.51.100.80')).status);
+    const secondQuote = await capPost('/api/roof/quote', { lat: 35.79, lng: -78.65 }, '198.51.100.81');
+    const secondBody = await secondQuote.json();
+    const secondGate = await capPost('/api/roof/quote-lead', { quoteId: secondBody.quoteId, ...contact, email: 'cap-b@example.com' }, '198.51.100.81');
+    const thirdQuote = await capPost('/api/roof/quote', { lat: 35.8, lng: -78.66 }, '198.51.100.82');
+    const afterCap = await capPost('/api/roof/quote-lead', { quoteId: secondBody.quoteId, ...contact, email: 'cap-b@example.com' }, '198.51.100.81');
+    check(
+      'quote cap counts the paid lookup once',
+      firstQuote.status === 200 && firstGate.status === 200 && reveals.every((code) => code === 200)
+        && secondQuote.status === 200 && secondGate.status === 200 && thirdQuote.status === 429 && afterCap.status === 200,
+      `q1=${firstQuote.status} g1=${firstGate.status} reveals=${reveals.join(',')} q2=${secondQuote.status} g2=${secondGate.status} q3=${thirdQuote.status} gateAfterCap=${afterCap.status}`,
+    );
+  } finally {
+    capSrv.kill();
+  }
 
   const html = await (await req('/quote')).text();
   const embedHtml = await (await req('/quote?embed=1')).text();
   const htmlBlob = `${html}\n${embedHtml}`;
-  const htmlHits = ['hdzEstimate', 'uhdzEstimate', 'quoteLow', 'quoteHigh', 'hdzPricePerSquare', '$430', '$470', 'lowEstimate', 'highEstimate']
+  const htmlHits = ['hdzEstimate', 'uhdzEstimate', 'quoteLow', 'quoteHigh', 'hdzPricePerSquare', '$430', '$470', 'lowEstimate', 'highEstimate', 'roofSquares', 'pitchOver12', 'totalAreaSqFt']
     .filter((needle) => htmlBlob.includes(needle));
   check('server-rendered quote HTML has no price fields', html.startsWith('<!DOCTYPE html>') && htmlHits.length === 0, htmlHits.join(','));
 
