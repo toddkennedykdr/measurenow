@@ -1,18 +1,42 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { FullQuoteData } from '../types';
 import { KD_CALL, QUOTE_DISCLAIMER } from '../quoteChrome';
 import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../quoteIncludes';
 
 interface Props {
   data: FullQuoteData;
-  onLeadSubmitted: (name: string) => void;
+  onStartOver?: () => void;
 }
+
+const QUOTE_PHOTOS = {
+  hdz: {
+    src: '/images/gaf-timberline-hdz.webp',
+    alt: 'GAF Timberline HDZ shingles',
+    width: 800,
+    height: 315,
+  },
+  uhdz: {
+    src: '/images/gaf-timberline-uhdz.webp',
+    alt: 'GAF Timberline UHDZ shingles',
+    width: 800,
+    height: 315,
+  },
+} as const;
 
 type ShingleOption = 'hdz' | 'uhdz';
 
 function QuotePanel({ tier, selected }: { tier: ShingleOption; selected: boolean }) {
+  const photo = QUOTE_PHOTOS[tier];
   return (
     <div className={selected ? `quote-panel quote-panel--${tier} quote-panel--selected` : `quote-panel quote-panel--${tier}`}>
+      <img
+        className="quote-photo"
+        src={photo.src}
+        alt={photo.alt}
+        width={photo.width}
+        height={photo.height}
+        loading="lazy"
+      />
       <div className="quote-warranty">
         <p className="quote-warranty__line">
           <strong className="quote-warranty__label">{`${QUOTE_WARRANTY.label} `}</strong>
@@ -40,13 +64,7 @@ function QuotePanel({ tier, selected }: { tier: ShingleOption; selected: boolean
   );
 }
 
-export function QuoteResult({ data, onLeadSubmitted }: Props) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  // Display-only. The lead still sends both HDZ and UHDZ totals.
+export function QuoteResult({ data, onStartOver }: Props) {
   const [option, setOption] = useState<ShingleOption>('hdz');
   const [wide, setWide] = useState(false);
   const optionRefs = useRef<Record<ShingleOption, HTMLButtonElement | null>>({ hdz: null, uhdz: null });
@@ -106,48 +124,6 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
     );
   }
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !email.trim() || !phone.trim()) {
-      setError('Please fill in all fields.');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const res = await fetch('/api/lead/capture', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim(),
-          phone: phone.trim(),
-          address,
-          quoteLow: quote.hdzEstimate,
-          quoteHigh: quote.uhdzEstimate,
-          roofSqFt: roofData.totalAreaSqFt,
-          roofSquares: quote.roofSquares,
-          avgPitchDegrees: quote.avgPitchDegrees,
-          pitchOver12: quote.pitchOver12,
-        }),
-      });
-
-      const result = await res.json();
-      if (!res.ok) {
-        setError(result.error || 'Something went wrong.');
-        return;
-      }
-
-      onLeadSubmitted(name.trim());
-    } catch {
-      setError('Network error. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="card">
       <div className="quote-result">
@@ -202,62 +178,13 @@ export function QuoteResult({ data, onLeadSubmitted }: Props) {
           <span className="quote-result__call-number">(919) 977-4074</span>
         </a>
 
+        {onStartOver && (
+          <button type="button" className="btn btn--outline quote-result__restart" onClick={onStartOver}>
+            Check another address
+          </button>
+        )}
+
       </div>
-
-      <div className="divider" />
-
-      <div className="lead-section__title">Want an exact quote?</div>
-      <p className="lead-section__subtitle">
-        Share your info and we'll follow up with a detailed, no-obligation estimate.
-      </p>
-
-      {error && <div className="error-msg">{error}</div>}
-
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="name">Full Name</label>
-          <input
-            id="name"
-            type="text"
-            className="input"
-            placeholder="John Smith"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={loading}
-            autoComplete="name"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            className="input"
-            placeholder="john@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={loading}
-            autoComplete="email"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="phone">Phone</label>
-          <input
-            id="phone"
-            type="tel"
-            className="input"
-            placeholder="Your phone number"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            disabled={loading}
-            autoComplete="tel"
-          />
-        </div>
-        <button type="submit" className="btn btn--secondary" disabled={loading}>
-          {loading && <span className="spinner" />}
-          {loading ? 'Submitting...' : 'Get My Detailed Estimate'}
-        </button>
-      </form>
     </div>
   );
 }

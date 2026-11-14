@@ -6,6 +6,7 @@ import { AuthProvider } from '../src/context/AuthContext';
 import App from '../src/App';
 import { NavBar } from '../src/components/NavBar';
 import { QuoteResult } from '../src/components/QuoteResult';
+import { QuoteGate } from '../src/components/QuoteGate';
 import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../src/quoteIncludes';
 import type { FullQuoteData } from '../src/types';
 import {
@@ -108,7 +109,7 @@ const quote: FullQuoteData = {
     materialNote: 'Architectural shingles',
   },
 };
-const result = renderToString(<QuoteResult data={quote} onLeadSubmitted={() => {}} />);
+const result = renderToString(<QuoteResult data={quote} />);
 check(
   'quote result has the call link',
   result.includes('href="tel:+19199774074"') && result.includes('Call K&amp;D Roofing: (919) 977-4074'),
@@ -190,9 +191,52 @@ check(
     && countText(result, 'rel="noopener noreferrer"') === 2
     && countText(result, 'Click here to apply') === 2,
 );
+const ALLOWED_QUOTE_IMAGES = [
+  '/images/gaf-timberline-hdz.webp',
+  '/images/gaf-timberline-uhdz.webp',
+] as const;
+const quoteImgs = [...result.matchAll(/<img\b[^>]*>/gi)].map((match) => match[0]);
+function imageSrc(tag: string) {
+  const match = tag.match(/src="([^"]+)"/);
+  return match ? match[1] : '';
+}
 check(
-  'quote screen renders no images',
-  !/<img\b/i.test(result),
+  'quote screen images are only the two GAF product photos',
+  quoteImgs.length === 2
+    && quoteImgs.every((tag) => (ALLOWED_QUOTE_IMAGES as readonly string[]).includes(imageSrc(tag)))
+    && new Set(quoteImgs.map(imageSrc)).size === 2
+    && quoteImgs.every((tag) => tag.includes('loading="lazy"'))
+    && quoteImgs.every((tag) => tag.includes('width="800"') && tag.includes('height="315"'))
+    && quoteImgs.every((tag) => !/logo/i.test(tag))
+    && result.includes('alt="GAF Timberline HDZ shingles"')
+    && result.includes('alt="GAF Timberline UHDZ shingles"'),
+  quoteImgs.join(' | '),
+);
+const quoteImageDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/images');
+const quoteImageFiles = readdirSync(quoteImageDir).filter((name) => !name.startsWith('.'));
+check(
+  'public quote images are exactly the two GAF product photos',
+  quoteImageFiles.length === 2
+    && quoteImageFiles.includes('gaf-timberline-hdz.webp')
+    && quoteImageFiles.includes('gaf-timberline-uhdz.webp'),
+  quoteImageFiles.join(', '),
+);
+check('address step does not render package photos', !unframed.includes('/images/gaf-timberline-') && !embed.includes('/images/gaf-timberline-'));
+const gateHtml = renderToString(
+  <QuoteGate address="1 Test St, Raleigh, NC" submitting={false} serverError="" onSubmit={() => {}} />,
+);
+check(
+  'gate form has contact fields and no prices or photos',
+  gateHtml.includes('See your estimate')
+    && gateHtml.includes('K&amp;D Roofing')
+    && gateHtml.includes('id="gate-name"')
+    && gateHtml.includes('id="gate-phone"')
+    && gateHtml.includes('id="gate-email"')
+    && gateHtml.includes('id="gate-address"')
+    && gateHtml.includes('1 Test St, Raleigh, NC')
+    && !/<img\b/i.test(gateHtml)
+    && !gateHtml.includes('$')
+    && !/no pressure/i.test(gateHtml),
 );
 check(
   'quote result names GAF Master Elite in plain text',
