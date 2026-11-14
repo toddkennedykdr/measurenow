@@ -44,6 +44,63 @@ export function passwordProblem(password: unknown): string | null {
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** One-time password reset links. 32 bytes, base64url, stored only as SHA-256. */
+export const RESET_TOKEN_BYTES = 32;
+export const RESET_MAX_HOURS = 24;
+export const RESET_DEFAULT_HOURS = 24;
+export const RESET_LINK_ERROR = 'This reset link is invalid or has expired';
+
+const RESET_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+export function newResetToken(): string {
+  return randomBytes(RESET_TOKEN_BYTES).toString('base64url');
+}
+
+export function hashResetToken(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+export function resetTokenProblem(token: unknown): string | null {
+  if (typeof token !== 'string' || !RESET_TOKEN_RE.test(token)) return RESET_LINK_ERROR;
+  return null;
+}
+
+/** Positive hours up to 24. Anything else is refused. */
+export function parseResetHours(raw: string): number | null {
+  const text = raw.trim().replace(/h$/i, '');
+  if (!/^\d+(\.\d+)?$/.test(text)) return null;
+  const hours = Number(text);
+  if (!Number.isFinite(hours) || hours <= 0 || hours > RESET_MAX_HOURS) return null;
+  return hours;
+}
+
+/** Minting is limited to Todd unless the operator passes an explicit flag. */
+export function mintResetUserAllowed(username: string, allowOther: boolean): boolean {
+  return username === 'Todd' || allowOther === true;
+}
+
+/** Flags already decided in SQL against NOW(). This function does not read clock values. */
+export type ResetGate = {
+  used: boolean;
+  expired: boolean;
+  userDisabled: boolean;
+};
+
+export function decidePasswordReset(input: {
+  reset: ResetGate | null;
+}): 'ok' | 'invalid' | 'used' | 'expired' | 'disabled' {
+  if (!input.reset) return 'invalid';
+  if (input.reset.used) return 'used';
+  if (input.reset.expired) return 'expired';
+  if (input.reset.userDisabled) return 'disabled';
+  return 'ok';
+}
+
+/** Every refusal looks the same. Callers must not describe which check failed. */
+export function passwordResetError(decision: ReturnType<typeof decidePasswordReset>): string | null {
+  return decision === 'ok' ? null : RESET_LINK_ERROR;
+}
+
 export type InviteGate = {
   usedAt: Date | string | null;
   revokedAt: Date | string | null;

@@ -1851,6 +1851,11 @@ body {
   margin-bottom: 0;
 }
 
+.account-form {
+  max-width: 480px;
+  padding: 20px;
+}
+
 .admin-empty {
   padding: 28px 16px;
   text-align: center;
