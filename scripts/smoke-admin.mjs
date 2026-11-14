@@ -19,6 +19,8 @@ const {
   accessDecision, shouldSeedAdmin, newInviteToken, hashInviteToken, inviteTokenProblem,
   tokenMatches, passwordProblem, INVITE_TTL_MS, decideInviteAccept, usernameProblem,
   emailProblem, nameProblem, publicUser, summarizeOrder,
+  decidePasswordReset, newResetToken, hashResetToken, resetTokenProblem, parseResetHours,
+  mintResetUserAllowed, passwordResetError, RESET_LINK_ERROR, RESET_MAX_HOURS, RESET_TOKEN_BYTES,
 } = authz;
 
 check('logged out is 401', accessDecision(null, true) === 401);
@@ -86,6 +88,40 @@ check('seed reads the password from the environment', seedSrc.includes('SEED_ADM
 check('seed source has no password literal', !/password\s*:\s*['"]/.test(seedSrc));
 check('migration does not rewrite password hashes', !/SET\s+password_hash/i.test(seedSrc) && /SET role = 'admin'/.test(seedSrc));
 check('seed only inserts when the table is empty', seedSrc.includes("skip-not-empty") || seedSrc.includes('shouldSeedAdmin'));
+
+const resetToken = newResetToken();
+check('reset token is 32-byte base64url', RESET_TOKEN_BYTES >= 32 && resetToken.length === 43 && /^[A-Za-z0-9_-]{43}$/.test(resetToken));
+const resetHash = hashResetToken(resetToken);
+check('reset token is stored as sha256', /^[a-f0-9]{64}$/.test(resetHash) && resetHash !== resetToken);
+check('malformed reset token is generic', resetTokenProblem('nope') === RESET_LINK_ERROR && resetTokenProblem(resetToken) === null);
+const futureReset = new Date(Date.now() + 60_000);
+const openReset = { usedAt: null, expiresAt: futureReset, userDisabled: false };
+check('fresh reset accepted', decidePasswordReset({ reset: openReset }) === 'ok');
+check('missing reset invalid', decidePasswordReset({ reset: null }) === 'invalid');
+check('used reset refused', decidePasswordReset({ reset: { ...openReset, usedAt: new Date() } }) === 'used');
+check('expired reset refused', decidePasswordReset({ reset: { ...openReset, expiresAt: past } }) === 'expired');
+check('disabled reset refused', decidePasswordReset({ reset: { ...openReset, userDisabled: true } }) === 'disabled');
+for (const decision of ['invalid', 'used', 'expired', 'disabled']) {
+  check(`reset refusal for ${decision} is generic`, passwordResetError(decision) === RESET_LINK_ERROR);
+}
+check('ok reset has no error', passwordResetError('ok') === null);
+check('reset expiry max is 24h', RESET_MAX_HOURS === 24 && parseResetHours('24') === 24 && parseResetHours('24h') === 24 && parseResetHours('1.5') === 1.5);
+check('reset expiry over 24h refused', parseResetHours('25') === null && parseResetHours('0') === null && parseResetHours('-1') === null && parseResetHours('nope') === null && parseResetHours('24.1') === null);
+check('mint allows only Todd unless flagged', mintResetUserAllowed('Todd', false) === true && mintResetUserAllowed('Ada', false) === false && mintResetUserAllowed('todd', false) === false && mintResetUserAllowed('Ada', true) === true);
+
+const authSrc = fs.readFileSync(path.join(root, 'server/routes/auth.ts'), 'utf8');
+const pwUses = authSrc.match(/passwordProblem\(req\.body\?\.password\)/g) || [];
+check('invite, reset, and change share password rules', pwUses.length >= 3);
+const scoped = authSrc.match(/UPDATE users SET password_hash = \$1 WHERE id = \$2/g) || [];
+check('password updates target one user id', scoped.length >= 2);
+check('reset locks the reset row', authSrc.includes('FOR UPDATE OF r'));
+check('password reset table is created idempotently', /CREATE TABLE IF NOT EXISTS password_resets/.test(seedSrc) && /CREATE UNIQUE INDEX IF NOT EXISTS password_resets_token_hash_idx/.test(seedSrc) && /CREATE INDEX IF NOT EXISTS password_resets_user_id_idx/.test(seedSrc));
+
+const mintSrc = fs.readFileSync(path.join(root, 'scripts/mint-reset.ts'), 'utf8');
+const securitySrc = fs.readFileSync(path.join(root, 'server/middleware/security.ts'), 'utf8');
+check('mint reuses the app origin', securitySrc.includes('https://measurenow-production.up.railway.app') && mintSrc.includes('https://measurenow-production.up.railway.app'));
+check('mint default file is private', mintSrc.includes('/workspace/private/mn-reset-link.txt'));
+check('mint source does not print the token or link', !mintSrc.includes('console.log(link)') && !mintSrc.includes('console.log(token)') && !mintSrc.includes('console.error(link)') && !mintSrc.includes('console.error(token)'));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
