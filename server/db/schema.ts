@@ -24,6 +24,15 @@ export const invites = pgTable('invites', {
   revokedAt: timestamp('revoked_at'),
 });
 
+export const passwordResets = pgTable('password_resets', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at').notNull(),
+  usedAt: timestamp('used_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 export const reports = pgTable('reports', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),

@@ -45,6 +45,16 @@ try {
   check('accept-invite bad token -> 400 without a database', invite.status === 400, `got ${invite.status}`);
   invite = await jpost('/api/auth/accept-invite', { token: 'a'.repeat(32), password: 'short' }, { 'X-Forwarded-For': '198.51.100.42' });
   check('accept-invite short password -> 400', invite.status === 400, `got ${invite.status}`);
+  let reset = await jpost('/api/auth/reset-password', { token: 'not-a-token', password: 'long-enough-pw' }, { 'X-Forwarded-For': '198.51.100.70' });
+  const resetBody = await reset.json();
+  check('reset-password bad token -> 400 without a database', reset.status === 400, `got ${reset.status}`);
+  check('reset-password bad token is generic', resetBody.error === 'This reset link is invalid or has expired', resetBody.error);
+  reset = await jpost('/api/auth/reset-password', { token: 'a'.repeat(43), password: 'short' }, { 'X-Forwarded-For': '198.51.100.71' });
+  check('reset-password short password -> 400', reset.status === 400, `got ${reset.status}`);
+  const change = await jpost('/api/auth/change-password', { currentPassword: 'anything', password: 'long-enough-pw' }, { 'X-Forwarded-For': '198.51.100.72' });
+  check('change-password anonymous -> 401', change.status === 401, `got ${change.status}`);
+  const resetGet = await req('/api/auth/reset-password/not-a-token', { headers: { 'X-Forwarded-For': '198.51.100.73' } });
+  check('GET reset-password bad token -> 400', resetGet.status === 400, `got ${resetGet.status}`);
 
   // 2. Unknown /api -> JSON 404; non-API path -> SPA 200
   let r = await req('/api/reports/admin/all/x'); // nonexistent
