@@ -32,7 +32,7 @@ import {
   readEmbedParentOrigins,
 } from '../server/embedOrigins';
 import type { BuildingRoofData } from '../server/services/solar';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -478,15 +478,35 @@ async function runGateFocusCheck() {
     },
     stdio: 'ignore',
   });
-  const chrome = spawn('/usr/bin/google-chrome', [
+  const chromeBin = process.env.QUOTE_UI_CHROME || '/usr/bin/google-chrome';
+  const userDataDir = path.join('/tmp', `quote-ui-chrome-${process.pid}`);
+  const chrome = spawn(chromeBin, [
     '--headless=new',
     '--no-sandbox',
     '--disable-gpu',
     '--disable-dev-shm-usage',
+    '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--disable-sync',
+    '--disable-default-apps',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-breakpad',
+    '--disable-crash-reporter',
+    '--disable-client-side-phishing-detection',
+    '--disable-domain-reliability',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-extensions',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-translate',
+    '--metrics-recording-only',
+    '--disable-features=Translate,AutofillServerCommunication,OptimizationHints,MediaRouter,InterestFeedContentSuggestions',
     `--remote-debugging-port=${chromePort}`,
-    `--user-data-dir=${path.join('/tmp', `quote-ui-chrome-${process.pid}`)}`,
+    `--user-data-dir=${userDataDir}`,
     'about:blank',
-  ], { stdio: 'ignore' });
+  ], { stdio: 'ignore', detached: true });
   let socket: WebSocket | null = null;
   try {
     const base = `http://127.0.0.1:${uiPort}`;
@@ -609,7 +629,19 @@ async function runGateFocusCheck() {
     check('gate error moves focus to the first invalid field', false, err instanceof Error ? err.message : String(err));
   } finally {
     socket?.close();
-    chrome.kill();
-    srv.kill();
+    srv.kill('SIGKILL');
+    try {
+      if (chrome.pid) process.kill(-chrome.pid, 'SIGKILL');
+    } catch {
+      chrome.kill('SIGKILL');
+    }
+    await new Promise((resolve) => {
+      if (chrome.exitCode != null || chrome.signalCode != null) resolve(undefined);
+      else {
+        chrome.once('exit', () => resolve(undefined));
+        setTimeout(resolve, 2000);
+      }
+    });
+    rmSync(userDataDir, { recursive: true, force: true });
   }
 }
