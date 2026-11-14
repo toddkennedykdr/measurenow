@@ -300,8 +300,9 @@ async function main() {
     const beforeInvite = await hashes(client);
     const inviteToken = track(randomBytes(16).toString('hex'));
     await client.query(
-      `INSERT INTO invites (name, username, token_hash, expires_at) VALUES ($1,$2,$3,$4)`,
-      ['New Person', 'newperson', sha(inviteToken), future],
+      `INSERT INTO invites (name, username, token_hash, expires_at)
+       VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'UTC') + interval '1 hour')`,
+      ['New Person', 'newperson', sha(inviteToken)],
     );
     const shortInvite = await jpost('/api/auth/accept-invite', { token: 'ab'.repeat(16), password: 'short' });
     check('invite password rule unchanged', shortInvite.status === 400 && shortInvite.data.error === 'Password must be at least 12 characters');
@@ -318,8 +319,9 @@ async function main() {
     const toddHashBefore = (await hashes(client)).find(row => row.username === 'Todd').password_hash;
     const existingInvite = track(randomBytes(16).toString('hex'));
     await client.query(
-      `INSERT INTO invites (name, username, token_hash, expires_at) VALUES ($1,$2,$3,$4)`,
-      ['Todd Kennedy', 'Todd', sha(existingInvite), future],
+      `INSERT INTO invites (name, username, token_hash, expires_at)
+       VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'UTC') + interval '1 hour')`,
+      ['Todd Kennedy', 'Todd', sha(existingInvite)],
     );
     const taken = await jpost('/api/auth/accept-invite', { token: existingInvite, password: PW.third });
     check('invite still cannot change an existing password', taken.status === 409 && taken.data.error === 'An account with that username already exists. This invite cannot change an existing password.');
@@ -350,11 +352,18 @@ async function main() {
     check('mint file contains the link', link === `${APP_BASE}/reset/${mintedToken}` && mintedToken.length === 43);
     const exp = expiryUtcMs(stdout) - Date.now();
     check('mint default expiry is 24h', exp > 23.5 * 60 * 60 * 1000 && exp < 24.05 * 60 * 60 * 1000);
-    const toddResets = await client.query(`SELECT token_hash, used_at FROM password_resets WHERE user_id = $1`, [toddId]);
-    const byHash = new Map(toddResets.rows.map(row => [row.token_hash, row.used_at]));
-    check('older unused token is revoked', byHash.get(sha(oldUnused)) != null && Date.now() - new Date(byHash.get(sha(oldUnused))).getTime() < 5 * 60 * 1000);
-    check('already used token was not rewritten', byHash.get(sha(oldUsed)) != null && Date.now() - new Date(byHash.get(sha(oldUsed))).getTime() > 60 * 60 * 1000);
-    check('mint stores only the new hash', byHash.has(sha(mintedToken)) && byHash.get(sha(mintedToken)) == null);
+    const ages = await client.query(
+      `SELECT token_hash,
+              EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'UTC') - used_at)) AS age
+       FROM password_resets WHERE user_id = $1`,
+      [toddId],
+    );
+    const ageByHash = new Map(ages.rows.map(row => [row.token_hash, row.age == null ? null : Number(row.age)]));
+    const unusedAge = ageByHash.get(sha(oldUnused));
+    const usedAge = ageByHash.get(sha(oldUsed));
+    check('older unused token is revoked', unusedAge != null && unusedAge >= 0 && unusedAge < 5 * 60);
+    check('already used token was not rewritten', usedAge != null && usedAge > 60 * 60);
+    check('mint stores only the new hash', ageByHash.has(sha(mintedToken)) && ageByHash.get(sha(mintedToken)) == null);
 
     const adaBefore = await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [adaId]);
     const refused = runMint(['Ada', '--expires-hours', '1', '--out', path.join(dir, 'ada-forbidden.txt'), '--base-url', APP_BASE]);
@@ -418,13 +427,29 @@ async function main() {
     const zoneLate = await jpost('/api/auth/reset-password', { token: zoneToken, password: PW.reset });
     check('token is refused once past expiry', zoneLate.status === 400 && zoneLate.data.error === GENERIC);
 
+    const keeper = newToken();
+    await insertReset(client, toddId, keeper, { expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000) });
+    const beforeBlocked = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets`)).rows[0].n);
+    const keeperOk = await jget(`/api/auth/reset-password/${encodeURIComponent(keeper)}`);
+    check('keeper token works before blocked mint', keeperOk.status === 200 && keeperOk.data.ok === true);
+
+    const existingFile = path.join(dir, 'already-there.txt');
+    fs.writeFileSync(existingFile, 'leave-this-file\n', { mode: 0o600 });
+    const existsRun = runMint(['Todd', '--expires-hours', '1', '--out', existingFile, '--base-url', APP_BASE]);
+    const afterExists = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets`)).rows[0].n);
+    const keeperAfterExists = await jget(`/api/auth/reset-password/${encodeURIComponent(keeper)}`);
+    check('existing output file is refused', existsRun.status === 1 && (existsRun.stderr || '').includes('Output file already exists; choose another path or remove it first'));
+    check('existing file refusal leaves the database unchanged', outputHides(`${existsRun.stdout || ''}\n${existsRun.stderr || ''}`, [keeper]) && afterExists === beforeBlocked && keeperAfterExists.status === 200 && fs.readFileSync(existingFile, 'utf8') === 'leave-this-file\n');
+
     const sentinel = path.join(dir, 'sentinel.txt');
     const symlink = path.join(dir, 'out-symlink');
     fs.writeFileSync(sentinel, 'sentinel-keep\n', { mode: 0o600 });
     fs.symlinkSync(sentinel, symlink);
     const sym = runMint(['Todd', '--expires-hours', '1', '--out', symlink, '--base-url', APP_BASE]);
-    check('symlink output is refused', sym.status === 1);
-    check('symlink refusal hides the token and link', outputHides(`${sym.stdout || ''}\n${sym.stderr || ''}`, []) && fs.lstatSync(symlink).isSymbolicLink() && fs.readFileSync(sentinel, 'utf8') === 'sentinel-keep\n');
+    const afterSym = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets`)).rows[0].n);
+    const keeperAfterSym = await jget(`/api/auth/reset-password/${encodeURIComponent(keeper)}`);
+    check('symlink output is refused', sym.status === 1 && (sym.stderr || '').includes('Could not write the reset link file.'));
+    check('symlink refusal leaves the database unchanged', outputHides(`${sym.stdout || ''}\n${sym.stderr || ''}`, [keeper]) && afterSym === beforeBlocked && keeperAfterSym.status === 200 && fs.lstatSync(symlink).isSymbolicLink() && fs.readFileSync(sentinel, 'utf8') === 'sentinel-keep\n');
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));

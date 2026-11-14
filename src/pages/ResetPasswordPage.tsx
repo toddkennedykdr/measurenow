@@ -3,10 +3,11 @@ import { Link, useParams } from 'react-router-dom';
 import { BrandLogo } from '../components/BrandLogo';
 
 const GENERIC = 'This reset link is invalid or has expired';
+const RATE_LIMIT = 'Too many tries, please wait a few minutes.';
 
 export default function ResetPasswordPage() {
   const { token = '' } = useParams();
-  const [phase, setPhase] = useState<'checking' | 'invalid' | 'ready' | 'done'>('checking');
+  const [phase, setPhase] = useState<'checking' | 'limited' | 'invalid' | 'ready' | 'done'>('checking');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
@@ -21,7 +22,9 @@ export default function ResetPasswordPage() {
     (async () => {
       try {
         const res = await fetch(`/api/auth/reset-password/${encodeURIComponent(token)}`);
-        if (!cancelled) setPhase(res.ok ? 'ready' : 'invalid');
+        if (cancelled) return;
+        if (res.status === 429) setPhase('limited');
+        else setPhase(res.ok ? 'ready' : 'invalid');
       } catch {
         if (!cancelled) setPhase('invalid');
       }
@@ -52,7 +55,7 @@ export default function ResetPasswordPage() {
         body: JSON.stringify({ token, password }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 429) throw new Error('Too many tries, please wait a few minutes');
+      if (res.status === 429) throw new Error(RATE_LIMIT);
       if (!res.ok) throw new Error(data.error || 'Could not reset the password');
       setPhase('done');
     } catch (err: any) {
@@ -71,6 +74,8 @@ export default function ResetPasswordPage() {
         </div>
         {phase === 'checking' ? (
           <p className="admin-page__sub">Checking this reset link…</p>
+        ) : phase === 'limited' ? (
+          <div className="error-msg">{RATE_LIMIT}</div>
         ) : phase === 'invalid' ? (
           <div>
             <div className="error-msg">{GENERIC}</div>
