@@ -111,10 +111,36 @@ function parseArgs(argv: string[]): Args {
   return { ok: true, username, hours, outPath, baseUrl };
 }
 
+function ensurePrivateDir(dir: string) {
+  const absolute = path.resolve(dir);
+  if (absolute === path.parse(absolute).root) return;
+  try {
+    fs.lstatSync(absolute);
+    return;
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  ensurePrivateDir(path.dirname(absolute));
+  fs.mkdirSync(absolute, { mode: 0o700 });
+  fs.chmodSync(absolute, 0o700);
+}
+
 function writeLinkFile(outPath: string, link: string) {
   const resolved = path.resolve(outPath);
-  fs.mkdirSync(path.dirname(resolved), { recursive: true });
-  const fd = fs.openSync(resolved, 'w', 0o600);
+  let existing: fs.Stats | null = null;
+  try {
+    existing = fs.lstatSync(resolved);
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  if (existing?.isSymbolicLink()) {
+    const error: NodeJS.ErrnoException = new Error('symlink');
+    error.code = 'ELOOP';
+    throw error;
+  }
+  ensurePrivateDir(path.dirname(resolved));
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
+  const fd = fs.openSync(resolved, flags, 0o600);
   try {
     fs.writeFileSync(fd, `${link}\n`);
   } finally {
@@ -123,7 +149,7 @@ function writeLinkFile(outPath: string, link: string) {
   fs.chmodSync(resolved, 0o600);
 }
 
-async function createReset(pool: Pool, args: OkArgs): Promise<{ ok: true; outPath: string; expiresAt: string } | { ok: false; message: string }> {
+async function createReset(pool: Pool, args: OkArgs): Promise<{ ok: true; outPath: string; expiresEt: string; expiresUtc: string } | { ok: false; message: string }> {
   const client = await pool.connect();
   let token = '';
   let tokenHash = '';
@@ -144,32 +170,46 @@ async function createReset(pool: Pool, args: OkArgs): Promise<{ ok: true; outPat
       return { ok: false, message: 'That account is disabled.' };
     }
     await client.query(
-      `UPDATE password_resets SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`,
+      `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE user_id = $1 AND used_at IS NULL`,
       [user.id],
     );
     token = newResetToken();
     tokenHash = hashResetToken(token);
-    const expiresAt = new Date(Date.now() + Math.round(args.hours * 60 * 60 * 1000));
-    await client.query(
-      `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-      [user.id, tokenHash, expiresAt],
+    const inserted = await client.query(
+      `INSERT INTO password_resets (user_id, token_hash, expires_at)
+       VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC') + make_interval(hours => trunc($3::numeric)::int, secs => (($3::numeric - trunc($3::numeric)) * 3600)::double precision))
+       RETURNING
+         to_char(expires_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_utc,
+         to_char((expires_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York', 'YYYY-MM-DD HH24:MI:SS') AS expires_et`,
+      [user.id, tokenHash, args.hours],
     );
+    const expiresUtc = inserted.rows[0]?.expires_utc;
+    const expiresEt = inserted.rows[0]?.expires_et;
+    if (typeof expiresUtc !== 'string' || typeof expiresEt !== 'string') {
+      await client.query('ROLLBACK');
+      return { ok: false, message: 'Could not create the reset link.' };
+    }
     await client.query('COMMIT');
     committed = true;
     const link = `${args.baseUrl}/reset/${token}`;
     try {
       writeLinkFile(args.outPath, link);
-    } catch {
+    } catch (err: any) {
       try {
         await pool.query(
-          `UPDATE password_resets SET used_at = NOW() WHERE token_hash = $1 AND used_at IS NULL`,
+          `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE token_hash = $1 AND used_at IS NULL`,
           [tokenHash],
         );
-      } catch { /* the link file is still removed below */ }
-      try { fs.unlinkSync(path.resolve(args.outPath)); } catch { /* already gone */ }
+      } catch { /* the unwritten token is still revoked above */ }
+      if (err?.code !== 'ELOOP' && err?.code !== 'EEXIST') {
+        try {
+          const st = fs.lstatSync(path.resolve(args.outPath));
+          if (!st.isSymbolicLink()) fs.unlinkSync(path.resolve(args.outPath));
+        } catch { /* nothing of ours to remove */ }
+      }
       return { ok: false, message: 'Could not write the reset link file.' };
     }
-    return { ok: true, outPath: path.resolve(args.outPath), expiresAt: expiresAt.toISOString() };
+    return { ok: true, outPath: path.resolve(args.outPath), expiresEt, expiresUtc };
   } catch {
     if (!committed) {
       try { await client.query('ROLLBACK'); } catch { /* already closed */ }
@@ -208,7 +248,7 @@ async function main() {
       code = 1;
     } else {
       console.log(result.outPath);
-      console.log(`Expires at ${result.expiresAt}`);
+      console.log(`Expires at ${result.expiresEt} ET (${result.expiresUtc})`);
     }
   } catch {
     console.error('Could not create the reset link.');

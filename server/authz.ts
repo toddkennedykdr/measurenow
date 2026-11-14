@@ -79,21 +79,19 @@ export function mintResetUserAllowed(username: string, allowOther: boolean): boo
   return username === 'Todd' || allowOther === true;
 }
 
+/** Flags already decided in SQL against NOW(). This function does not read clock values. */
 export type ResetGate = {
-  usedAt: Date | string | null;
-  expiresAt: Date | string;
+  used: boolean;
+  expired: boolean;
   userDisabled: boolean;
 };
 
 export function decidePasswordReset(input: {
   reset: ResetGate | null;
-  now?: Date;
 }): 'ok' | 'invalid' | 'used' | 'expired' | 'disabled' {
   if (!input.reset) return 'invalid';
-  if (input.reset.usedAt) return 'used';
-  const now = input.now ?? new Date();
-  const expires = new Date(input.reset.expiresAt);
-  if (!(expires.getTime() > now.getTime())) return 'expired';
+  if (input.reset.used) return 'used';
+  if (input.reset.expired) return 'expired';
   if (input.reset.userDisabled) return 'disabled';
   return 'ok';
 }

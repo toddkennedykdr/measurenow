@@ -79,6 +79,7 @@ function childEnv(extra = {}) {
     NODE_ENV: 'development',
     SESSION_SECRET: 'password-test-only',
     SEED_ADMIN_PASSWORD: '',
+    TZ: 'UTC',
     ...extra,
   };
 }
@@ -116,19 +117,32 @@ function diffHashes(before, after, changedUsername) {
   return { targetChanged, othersSame };
 }
 
+function utcClock(value) {
+  if (!value) return null;
+  return value.toISOString().slice(0, 19).replace('T', ' ');
+}
 async function insertReset(client, userId, token, { expiresAt, usedAt = null }) {
   await client.query(
-    `INSERT INTO password_resets (user_id, token_hash, expires_at, used_at) VALUES ($1, $2, $3, $4)`,
-    [userId, sha(token), expiresAt, usedAt],
+    `INSERT INTO password_resets (user_id, token_hash, expires_at, used_at) VALUES ($1, $2, $3::timestamp, $4::timestamp)`,
+    [userId, sha(token), utcClock(expiresAt), utcClock(usedAt)],
   );
 }
 
-function runMint(args) {
+function runMint(args, extraEnv = {}) {
   return spawnSync(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/mint-reset.ts'), ...args], {
     cwd: root,
-    env: childEnv(),
+    env: childEnv(extraEnv),
     encoding: 'utf8',
   });
+}
+function expiryShape(stdout) {
+  const lines = (stdout || '').trim().split('\n');
+  return lines.length === 2 && /^Expires at \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ET \(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\)$/.test(lines[1] || '');
+}
+function expiryUtcMs(stdout) {
+  const line = (stdout || '').trim().split('\n')[1] || '';
+  const match = line.match(/\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\)/);
+  return match ? Date.parse(match[1]) : NaN;
 }
 function outputHides(text, hidden) {
   if (/https?:\/\//.test(text) || text.includes('/reset/')) return false;
@@ -329,12 +343,12 @@ async function main() {
     track(mintedToken);
     const hidden = [mintedToken, link, oldUnused, oldUsed];
     check('mint stdout and stderr contain no token and no link', minted.status === 0 && outputHides(stdout + stderr, hidden));
-    check('mint stdout is only the path and expiry', stdout.trim().split('\n').length === 2 && stdout.trim().split('\n')[0] === path.resolve(toddOut) && /^Expires at \d{4}-\d{2}-\d{2}T/.test(stdout.trim().split('\n')[1] || ''));
+    check('mint stdout is only the path and expiry', stdout.trim().split('\n')[0] === path.resolve(toddOut) && expiryShape(stdout));
     check('mint stderr is empty', stderr === '');
     const mode = fs.existsSync(toddOut) ? fs.statSync(toddOut).mode & 0o777 : 0;
     check('mint file mode is 0600', mode === 0o600, `mode=${mode.toString(8)}`);
     check('mint file contains the link', link === `${APP_BASE}/reset/${mintedToken}` && mintedToken.length === 43);
-    const exp = new Date((stdout.trim().split('\n')[1] || '').replace('Expires at ', '')).getTime() - Date.now();
+    const exp = expiryUtcMs(stdout) - Date.now();
     check('mint default expiry is 24h', exp > 23.5 * 60 * 60 * 1000 && exp < 24.05 * 60 * 60 * 1000);
     const toddResets = await client.query(`SELECT token_hash, used_at FROM password_resets WHERE user_id = $1`, [toddId]);
     const byHash = new Map(toddResets.rows.map(row => [row.token_hash, row.used_at]));
@@ -362,12 +376,55 @@ async function main() {
     track(adaLink);
     track(adaToken);
     check('flag allows another user', adaMint.status === 0 && outputHides(`${adaMint.stdout || ''}${adaMint.stderr || ''}`, [adaLink, adaToken]));
-    const adaExp = new Date(((adaMint.stdout || '').trim().split('\n')[1] || '').replace('Expires at ', '')).getTime() - Date.now();
+    const adaExp = expiryUtcMs(adaMint.stdout || '') - Date.now();
     check('expiry flag of 1h is honored', adaExp > 0.9 * 60 * 60 * 1000 && adaExp < 1.05 * 60 * 60 * 1000);
     const adaMode = fs.existsSync(adaOut) ? fs.statSync(adaOut).mode & 0o777 : 0;
     check('other user file is also 0600', adaMode === 0o600);
     const adaRow = await client.query(`SELECT used_at FROM password_resets WHERE token_hash = $1`, [sha(adaToken)]);
     check('other user hash stored unused', adaRow.rows[0] && adaRow.rows[0].used_at == null);
+
+    const zoneOut = path.join(dir, 'zone', 'nested', 'link.txt');
+    const zoneMint = runMint(
+      ['Todd', '--expires-hours', '24', '--out', zoneOut, '--base-url', APP_BASE],
+      { TZ: 'America/New_York' },
+    );
+    const zoneStdout = zoneMint.stdout || '';
+    const zoneStderr = zoneMint.stderr || '';
+    const zoneLink = fs.existsSync(zoneOut) ? fs.readFileSync(zoneOut, 'utf8').trim() : '';
+    const zoneToken = zoneLink.includes('/') ? zoneLink.slice(zoneLink.lastIndexOf('/') + 1) : '';
+    track(zoneLink);
+    track(zoneToken);
+    check('mint in Eastern time exits 0', zoneMint.status === 0 && expiryShape(zoneStdout));
+    check('Eastern mint hides the token and link', outputHides(zoneStdout + zoneStderr, [zoneToken, zoneLink]) && zoneStderr === '');
+    const zoneMode = fs.existsSync(path.join(dir, 'zone')) ? fs.statSync(path.join(dir, 'zone')).mode & 0o777 : 0;
+    const nestedMode = fs.existsSync(path.join(dir, 'zone', 'nested')) ? fs.statSync(path.join(dir, 'zone', 'nested')).mode & 0o777 : 0;
+    check('new output folders are mode 0700', zoneMode === 0o700 && nestedMode === 0o700, `zone=${zoneMode.toString(8)} nested=${nestedMode.toString(8)}`);
+    const span = await client.query(
+      `SELECT EXTRACT(EPOCH FROM (expires_at - (NOW() AT TIME ZONE 'UTC'))) AS seconds,
+              to_char(expires_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_utc
+       FROM password_resets WHERE token_hash = $1`,
+      [sha(zoneToken)],
+    );
+    const seconds = Number(span.rows[0]?.seconds);
+    check('expiry lasts 24h plus or minus 1 minute from DB now', Number.isFinite(seconds) && Math.abs(seconds - 24 * 60 * 60) <= 60, `seconds=${seconds}`);
+    const printedUtc = (zoneStdout.trim().split('\n')[1] || '').match(/\(([^)]+)\)$/);
+    check('printed expiry is the database value in ET and UTC', typeof span.rows[0]?.expires_utc === 'string' && printedUtc?.[1] === span.rows[0].expires_utc);
+    const zoneCheck = await jget(`/api/auth/reset-password/${encodeURIComponent(zoneToken)}`);
+    check('token is accepted before expiry', zoneCheck.status === 200 && zoneCheck.data.ok === true);
+    await client.query(
+      `UPDATE password_resets SET expires_at = (NOW() AT TIME ZONE 'UTC') - interval '1 minute' WHERE token_hash = $1`,
+      [sha(zoneToken)],
+    );
+    const zoneLate = await jpost('/api/auth/reset-password', { token: zoneToken, password: PW.reset });
+    check('token is refused once past expiry', zoneLate.status === 400 && zoneLate.data.error === GENERIC);
+
+    const sentinel = path.join(dir, 'sentinel.txt');
+    const symlink = path.join(dir, 'out-symlink');
+    fs.writeFileSync(sentinel, 'sentinel-keep\n', { mode: 0o600 });
+    fs.symlinkSync(sentinel, symlink);
+    const sym = runMint(['Todd', '--expires-hours', '1', '--out', symlink, '--base-url', APP_BASE]);
+    check('symlink output is refused', sym.status === 1);
+    check('symlink refusal hides the token and link', outputHides(`${sym.stdout || ''}\n${sym.stderr || ''}`, []) && fs.lstatSync(symlink).isSymbolicLink() && fs.readFileSync(sentinel, 'utf8') === 'sentinel-keep\n');
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));

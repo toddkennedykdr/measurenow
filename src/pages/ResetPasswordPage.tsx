@@ -52,6 +52,7 @@ export default function ResetPasswordPage() {
         body: JSON.stringify({ token, password }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 429) throw new Error('Too many tries, please wait a few minutes');
       if (!res.ok) throw new Error(data.error || 'Could not reset the password');
       setPhase('done');
     } catch (err: any) {

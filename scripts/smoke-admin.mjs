@@ -94,12 +94,11 @@ check('reset token is 32-byte base64url', RESET_TOKEN_BYTES >= 32 && resetToken.
 const resetHash = hashResetToken(resetToken);
 check('reset token is stored as sha256', /^[a-f0-9]{64}$/.test(resetHash) && resetHash !== resetToken);
 check('malformed reset token is generic', resetTokenProblem('nope') === RESET_LINK_ERROR && resetTokenProblem(resetToken) === null);
-const futureReset = new Date(Date.now() + 60_000);
-const openReset = { usedAt: null, expiresAt: futureReset, userDisabled: false };
+const openReset = { used: false, expired: false, userDisabled: false };
 check('fresh reset accepted', decidePasswordReset({ reset: openReset }) === 'ok');
 check('missing reset invalid', decidePasswordReset({ reset: null }) === 'invalid');
-check('used reset refused', decidePasswordReset({ reset: { ...openReset, usedAt: new Date() } }) === 'used');
-check('expired reset refused', decidePasswordReset({ reset: { ...openReset, expiresAt: past } }) === 'expired');
+check('used reset refused', decidePasswordReset({ reset: { ...openReset, used: true } }) === 'used');
+check('expired reset refused', decidePasswordReset({ reset: { ...openReset, expired: true } }) === 'expired');
 check('disabled reset refused', decidePasswordReset({ reset: { ...openReset, userDisabled: true } }) === 'disabled');
 for (const decision of ['invalid', 'used', 'expired', 'disabled']) {
   check(`reset refusal for ${decision} is generic`, passwordResetError(decision) === RESET_LINK_ERROR);

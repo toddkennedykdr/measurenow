@@ -126,10 +126,10 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
 
 const resetLimit = perIpLimit('reset-password', 15 * 60_000, 20);
 
-function resetRowGate(row: { used_at: Date | string | null; expires_at: Date | string; disabled: boolean } | undefined) {
+function resetRowGate(row: { used: boolean; expired: boolean; user_disabled: boolean } | undefined) {
   return decidePasswordReset({
     reset: row
-      ? { usedAt: row.used_at, expiresAt: row.expires_at, userDisabled: Boolean(row.disabled) }
+      ? { used: row.used, expired: row.expired, userDisabled: Boolean(row.user_disabled) }
       : null,
   });
 }
@@ -139,7 +139,9 @@ authRouter.get('/reset-password/:token', resetLimit, async (req: Request, res: R
   if (tokenError) return res.status(400).json({ error: tokenError });
   try {
     const found = await pool.query(
-      `SELECT r.used_at, r.expires_at, u.disabled
+      `SELECT u.disabled AS user_disabled,
+              (r.used_at IS NOT NULL) AS used,
+              (r.expires_at <= (NOW() AT TIME ZONE 'UTC')) AS expired
        FROM password_resets r
        JOIN users u ON u.id = r.user_id
        WHERE r.token_hash = $1`,
@@ -167,7 +169,10 @@ authRouter.post('/reset-password', resetLimit, async (req: Request, res: Respons
   try {
     await client.query('BEGIN');
     const found = await client.query(
-      `SELECT r.id, r.user_id, r.used_at, r.expires_at, u.disabled
+      `SELECT r.id, r.user_id,
+              u.disabled AS user_disabled,
+              (r.used_at IS NOT NULL) AS used,
+              (r.expires_at <= (NOW() AT TIME ZONE 'UTC')) AS expired
        FROM password_resets r
        JOIN users u ON u.id = r.user_id
        WHERE r.token_hash = $1
@@ -191,7 +196,10 @@ authRouter.post('/reset-password', resetLimit, async (req: Request, res: Respons
       return res.status(400).json({ error: RESET_LINK_ERROR });
     }
     const marked = await client.query(
-      `UPDATE password_resets SET used_at = NOW() WHERE id = $1 AND used_at IS NULL RETURNING id`,
+      `UPDATE password_resets
+       SET used_at = (NOW() AT TIME ZONE 'UTC')
+       WHERE id = $1 AND used_at IS NULL
+       RETURNING id`,
       [row.id],
     );
     if (!marked.rows[0]) {
