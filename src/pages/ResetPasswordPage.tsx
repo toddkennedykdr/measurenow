@@ -7,7 +7,7 @@ const RATE_LIMIT = 'Too many tries, please wait a few minutes.';
 
 export default function ResetPasswordPage() {
   const { token = '' } = useParams();
-  const [phase, setPhase] = useState<'checking' | 'limited' | 'invalid' | 'ready' | 'done'>('checking');
+  const [phase, setPhase] = useState<'checking' | 'limited' | 'invalid' | 'ready' | 'done'>(token ? 'checking' : 'invalid');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
