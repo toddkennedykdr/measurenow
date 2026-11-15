@@ -197,6 +197,18 @@ try {
       `status=${r.status} xfo=${xfo} csp=${csp} corp=${corp}`,
     );
   }
+  const staticLogo = await req('/static/kd-logo.png');
+  const staticCorp = staticLogo.headers.get('cross-origin-resource-policy');
+  const pageCorp = (await req('/login')).headers.get('cross-origin-resource-policy');
+  check(
+    'static assets are cross-origin and a normal page stays same-origin',
+    staticLogo.status === 200
+      && (staticLogo.headers.get('content-type') || '').includes('image/png')
+      && staticCorp === 'cross-origin'
+      && staticLogo.headers.get('content-security-policy') === null
+      && pageCorp === 'same-origin',
+    `status=${staticLogo.status} corp=${staticCorp} page=${pageCorp}`,
+  );
 } catch (e) {
   fail++; console.error('ERROR', e);
 } finally {

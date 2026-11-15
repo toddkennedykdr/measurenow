@@ -47,6 +47,8 @@ type Session = {
   quote: RoofQuote;
   roof: StoredRoof;
   address: string | null;
+  /** Formatted address from geocoding, stored when the quote session is created. */
+  geocodedAddress: string | null;
   leadSent: boolean;
   fingerprint: string | null;
 };
@@ -89,11 +91,20 @@ function sweep(now = Date.now()) {
   }
 }
 
+/** Geocoded formatted address. The gate form address is never used as a fallback. */
+export function geocodedAddressFrom(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (trimmed.length < 5 || trimmed.length > 300) return null;
+  return trimmed;
+}
+
 export function createQuoteSession(input: {
   lat: number;
   lng: number;
   quote: RoofQuote;
   roof: StoredRoof;
+  geocodedAddress?: string | null;
 }): Session {
   sweep();
   const now = Date.now();
@@ -106,6 +117,7 @@ export function createQuoteSession(input: {
     quote: input.quote,
     roof: input.roof,
     address: null,
+    geocodedAddress: input.geocodedAddress || null,
     leadSent: false,
     fingerprint: null,
   };
@@ -302,7 +314,7 @@ export async function openQuoteForContact(session: Session, contact: ContactInpu
       maybeSendCustomerEstimateEmail({
         to: contact.email.trim(),
         name: contact.name.trim(),
-        address: contact.address.trim(),
+        address: current.geocodedAddress || '',
         roofSqFt: current.roof.totalAreaSqFt,
         hdzEstimate: current.quote.hdzEstimate,
         uhdzEstimate: current.quote.uhdzEstimate,

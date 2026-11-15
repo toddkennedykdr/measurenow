@@ -25,7 +25,7 @@ export const CUSTOMER_EMAIL_DEFAULTS = {
   replyTo: 'todd@kanddroofingnc.com',
   calendlyUrl: 'https://calendly.com/admin-kanddroofingnc/30min',
   calendlyLabel: 'Book your free inspection',
-  gcLicense: 'NC General Contractor License L.101285 (Limited, Residential), active through 12/31/2026',
+  gcLicense: 'NC General Contractor License L.101285 (Limited, Residential)',
   masterEliteText: 'K&D Roofing is a 2026 GAF Master Elite® Roofing Contractor',
   gafId: '1115371',
   logoPath: '/static/kd-logo.png',
@@ -49,6 +49,17 @@ const LOGO_PATH_ENV = 'CUSTOMER_EMAIL_LOGO_PATH';
 const BADGE_PATH_ENV = 'CUSTOMER_EMAIL_MASTER_ELITE_IMAGE_PATH';
 
 const SNAPSHOT_CID = 'house-snapshot';
+const FIRST_NAME_MAX = 40;
+const GREETING_FALLBACK = 'Hi there,';
+/**
+ * Postal address from toddkennedykdr/kd-website main, src/data/business.ts.
+ * streetAddress is "8601 Six Forks Rd., Suite 400".
+ * BUSINESS_CITY_LINE is "Raleigh, NC 27615".
+ * The site footer prints those two lines.
+ */
+const POSTAL_STREET = '8601 Six Forks Rd., Suite 400';
+const POSTAL_CITY = 'Raleigh, NC 27615';
+const RECEIPT_LINE = "You're receiving this because you requested an instant roof quote at kanddroofingnc.com.";
 const PHONE_DISPLAY = '(919) 977-4074';
 const PHONE_TEL = 'tel:+19199774074';
 const SUBJECT = 'Your K&D Roofing estimate';
@@ -134,6 +145,29 @@ function headerSafe(value: string | null): string | null {
 
 function oneLine(value: string): string {
   return value.replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function isPhoneLike(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 7) return false;
+  return value.replace(/[\d\s().+\-]/g, '').length === 0;
+}
+
+function isUnsafeNameToken(token: string): boolean {
+  if (token.includes('@')) return true;
+  if (/https?:\/\//i.test(token) || /^www\./i.test(token)) return true;
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(token)) return true;
+  return isPhoneLike(token);
+}
+
+/** First name only, at most 40 characters. Unsafe names become "Hi there,". */
+export function customerGreeting(name: string): string {
+  const cleaned = oneLine(name);
+  const tokens = cleaned.split(' ').filter(Boolean);
+  if (!tokens.length || tokens.some(isUnsafeNameToken) || isPhoneLike(cleaned)) return GREETING_FALLBACK;
+  const first = tokens[0].slice(0, FIRST_NAME_MAX);
+  if (!first) return GREETING_FALLBACK;
+  return `Hi ${first},`;
 }
 
 function httpsUrl(value: string | null): string | null {
@@ -288,6 +322,10 @@ export function buildCustomerEstimateEmail(model: CustomerEstimateModel, attachm
       </table>`
     : '';
 
+  const greeting = customerGreeting(model.name);
+  const addressHtml = model.address
+    ? `<p style="margin:0 0 4px;font-size:14px;line-height:20px;color:#4a5568;">${escapeHtml(model.address)}</p>`
+    : '';
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -311,8 +349,8 @@ export function buildCustomerEstimateEmail(model: CustomerEstimateModel, attachm
         <tr><td bgcolor="#f5a623" style="background-color:#f5a623;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
         <tr>
           <td style="padding:20px 24px 8px;font-family:Arial,Helvetica,sans-serif;">
-            <p style="margin:0 0 8px;font-size:16px;line-height:24px;color:#0a1628;">Hello ${escapeHtml(model.name)},</p>
-            <p style="margin:0 0 4px;font-size:14px;line-height:20px;color:#4a5568;">${escapeHtml(model.address)}</p>
+            <p style="margin:0 0 8px;font-size:16px;line-height:24px;color:#0a1628;">${escapeHtml(greeting)}</p>
+            ${addressHtml}
             <p style="margin:0;font-size:14px;line-height:20px;color:#0a1628;"><strong>${escapeHtml(model.roofSqFtLabel)}</strong></p>
           </td>
         </tr>
@@ -334,7 +372,12 @@ export function buildCustomerEstimateEmail(model: CustomerEstimateModel, attachm
           </td>
         </tr>
         <tr>
-          <td style="padding:8px 24px 24px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5b6678;">K&amp;D Roofing</td>
+          <td style="padding:16px 24px 24px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5b6678;">
+            <p style="margin:0 0 4px;font-weight:bold;color:#0a1628;">K&amp;D Roofing</p>
+            <p style="margin:0;">${escapeHtml(POSTAL_STREET)}<br>${escapeHtml(POSTAL_CITY)}</p>
+            <p style="margin:4px 0 0;"><a href="${PHONE_TEL}" style="color:#1b5de0;text-decoration:none;">${PHONE_DISPLAY}</a></p>
+            <p style="margin:8px 0 0;">${escapeHtml(RECEIPT_LINE)}</p>
+          </td>
         </tr>
       </table>
     </td>
@@ -346,11 +389,11 @@ export function buildCustomerEstimateEmail(model: CustomerEstimateModel, attachm
   const textLines = [
     SUBJECT,
     '',
-    `Hello ${model.name},`,
+    greeting,
     '',
-    model.address,
-    model.roofSqFtLabel,
   ];
+  if (model.address) textLines.push(model.address);
+  textLines.push(model.roofSqFtLabel);
   if (model.snapshotSrc) {
     textLines.push('', 'A satellite photo of the property is included in this email.');
   }
@@ -370,7 +413,16 @@ export function buildCustomerEstimateEmail(model: CustomerEstimateModel, attachm
   if (model.masterEliteText) textLines.push('', model.masterEliteText);
   if (model.gafId) textLines.push('', `GAF ID ${model.gafId}`);
   if (model.calendlyUrl && model.calendlyLabel) textLines.push('', `${model.calendlyLabel}: ${model.calendlyUrl}`);
-  textLines.push('', `Call K&D Roofing: ${PHONE_DISPLAY}`);
+  textLines.push(
+    '',
+    `Call K&D Roofing: ${PHONE_DISPLAY}`,
+    '',
+    'K&D Roofing',
+    POSTAL_STREET,
+    POSTAL_CITY,
+    PHONE_DISPLAY,
+    RECEIPT_LINE,
+  );
 
   return {
     html,

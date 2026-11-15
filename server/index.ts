@@ -46,6 +46,12 @@ const embedOrigins = parseEmbedParentOrigins(process.env.EMBED_PARENT_ORIGINS, m
 const QUOTE_FRAME_ANCESTORS = ["'self'", ...embedOrigins];
 const extraEmbedOrigins = embedOrigins.length > HARDCODED_EMBED_ORIGINS.length;
 const defaultHelmet = helmet({ contentSecurityPolicy: false });
+// Email clients load /static/kd-logo.png and the badge from another origin.
+// Only that path gets cross-origin CORP. Every other route keeps defaultHelmet.
+const staticAssetHelmet = helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+});
 const quoteEmbedHelmet = helmet({
   contentSecurityPolicy: {
     useDefaults: false,
@@ -62,7 +68,15 @@ function isQuoteDocument(urlPath: string): boolean {
   return urlPath === '/quote' || urlPath === '/quote/';
 }
 
+function isStaticAsset(urlPath: string): boolean {
+  return urlPath === '/static' || urlPath.startsWith('/static/');
+}
+
 app.use((req, res, next) => {
+  if (isStaticAsset(req.path)) {
+    staticAssetHelmet(req, res, next);
+    return;
+  }
   if (isQuoteDocument(req.path)) {
     quoteEmbedHelmet(req, res, next);
     return;

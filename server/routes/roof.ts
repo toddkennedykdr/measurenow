@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote } from '../services/pricing';
-import { createQuoteSession, progressBody } from '../services/quoteAccess';
+import { createQuoteSession, geocodedAddressFrom, progressBody } from '../services/quoteAccess';
 import { perIpLimit, dailyCap } from '../middleware/security';
 import { mountQuoteGate } from './quoteGate';
 
@@ -95,6 +95,7 @@ roofRouter.post('/quote', quoteIpLimit, quoteCap, async (req: Request, res: Resp
     const session = createQuoteSession({
       lat,
       lng,
+      geocodedAddress: geocodedAddressFrom(req.body?.address),
       quote,
       roof: {
         totalAreaSqFt: Math.round(building.totalAreaSqFt),

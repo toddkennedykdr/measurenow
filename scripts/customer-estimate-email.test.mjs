@@ -15,7 +15,10 @@ const { QUOTE_WARRANTY, quoteCardWarrantyLines } = require(path.join(root, 'dist
 
 const RATE_COPY = ['/sq', 'per square', '$430', '$470'];
 const ELITE_LINE = 'K&D Roofing is a 2026 GAF Master Elite® Roofing Contractor';
-const LICENSE = 'NC General Contractor License L.101285 (Limited, Residential), active through 12/31/2026';
+const LICENSE = 'NC General Contractor License L.101285 (Limited, Residential)';
+const POSTAL_STREET = '8601 Six Forks Rd., Suite 400';
+const POSTAL_CITY = 'Raleigh, NC 27615';
+const RECEIPT_LINE = "You're receiving this because you requested an instant roof quote at kanddroofingnc.com.";
 const CALENDLY = 'https://calendly.com/admin-kanddroofingnc/30min';
 const FROM = 'K&D Roofing <noreply@kanddroofingnc.com>';
 const REPLY_TO = 'todd@kanddroofingnc.com';
@@ -107,7 +110,22 @@ check('email warranty lines match the quote cards', hdzLines.every((line) => ren
 check('email has no per-square price', rateHits(combined).length === 0, rateHits(combined).join(','));
 check('email keeps the company name and phone', bareBrand(combined) === 0 && combined.includes('(919) 977-4074') && combined.includes('K&D Roofing') && !/no pressure/i.test(combined) && !/solar/i.test(combined));
 check('email includes the confirmed license, badge line, calendly, and GAF ID', rendered.text.includes(LICENSE) && rendered.text.includes(ELITE_LINE) && rendered.text.includes('Book your free inspection') && rendered.text.includes(CALENDLY) && rendered.text.includes('GAF ID 1115371'));
-check('email escapes the customer name', rendered.html.includes('Jane &lt;Homeowner&gt;') && !rendered.html.includes('Jane <Homeowner>'));
+check('email escapes a first name and does not print the rest', rendered.text.includes('Hi Jane,') && !rendered.text.includes('Homeowner') && !rendered.text.includes('<'));
+const escaped = email.renderCustomerEstimateEmail({ ...sample, name: 'J<ane> Homeowner' }, null);
+check('email escapes an unsafe character in the first name', escaped.html.includes('Hi J&lt;ane&gt;,') && !escaped.html.includes('J<ane>'));
+function greet(name) {
+  return email.renderCustomerEstimateEmail({ ...sample, name, address: '10 Geocoded Way, Raleigh, NC' }, null);
+}
+check('normal first name is the greeting', greet('Jane Homeowner').text.startsWith('Your K&D Roofing estimate\n\nHi Jane,'));
+check('a URL name becomes Hi there', greet('https://evil.example/phish').text.includes('Hi there,') && !greet('https://evil.example/phish').html.includes('evil.example'));
+check('a bare domain name becomes Hi there', greet('evil.example').text.includes('Hi there,') && !greet('evil.example').html.includes('evil.example'));
+check('an email name becomes Hi there', greet('jane@example.com').text.includes('Hi there,') && !greet('jane@example.com').html.includes('jane@example.com'));
+check('a phone name becomes Hi there', greet('(919) 555-0199').text.includes('Hi there,') && !greet('(919) 555-0199').html.includes('555-0199'));
+const longFirst = 'A'.repeat(60);
+const longMail = greet(`${longFirst} Smith`);
+check('a long first name is capped at 40 characters', longMail.text.includes(`Hi ${'A'.repeat(40)},`) && !longMail.text.includes(`Hi ${'A'.repeat(41)}`) && !longMail.html.includes('Smith'));
+check('email uses the license line without an expiry date', rendered.text.includes(LICENSE) && !rendered.text.includes('active through') && !rendered.html.includes('active through'));
+check('footer has the postal address, phone, and receipt line', rendered.html.includes(POSTAL_STREET) && rendered.html.includes(POSTAL_CITY) && rendered.html.includes('href="tel:+19199774074"') && rendered.html.includes('You&#39;re receiving this because you requested an instant roof quote at kanddroofingnc.com.') && rendered.text.includes(POSTAL_STREET) && rendered.text.includes(POSTAL_CITY) && rendered.text.includes(RECEIPT_LINE) && !/unsubscribe/i.test(`${rendered.html}\n${rendered.text}`));
 check('snapshot is a CID attachment and the html has no map URL or key', rendered.html.includes('cid:house-snapshot') && rendered.attachments.length === 1 && rendered.attachments[0].content_id === 'house-snapshot' && !rendered.html.includes('googleapis') && !rendered.html.includes('staticmap') && !rendered.html.includes('test-not-a-key') && !rendered.html.includes('key='));
 check('logo and badge are absolute urls with alt text', rendered.html.includes('https://measurenow-production.up.railway.app/static/kd-logo.png') && rendered.html.includes('alt="K&amp;D Roofing"') && rendered.html.includes('/static/master-elite-240.png') && rendered.html.includes('width="120"') && rendered.html.includes('width="140"'));
 
@@ -333,6 +351,26 @@ try {
   const later = readLog(on.log);
   const laterCustomer = parsed(later, 'api.resend.com').filter((body) => Array.isArray(body.to) && body.to.includes(contact.email));
   check('resubmit, refresh, and the same roof do not send another customer email', again.status === 200 && againBody.leadCreated === false && revealed.status === 200 && revealedBody.leadCreated === false && secondGate.status === 200 && secondBody.leadCreated === false && laterCustomer.length === 0 && !later.some((line) => String(line.url).includes('staticmap')));
+  fs.writeFileSync(on.log, '');
+  const geocoded = '10 Geocoded Way, Raleigh, NC';
+  const typed = '99 Typed Road, Durham, NC';
+  const geoQuote = await post(on.port, '/api/roof/quote', { lat: 35.81, lng: -78.7, address: geocoded }, '198.51.100.36');
+  const geoProgress = await geoQuote.json();
+  const geoGate = await post(on.port, '/api/roof/quote-lead', {
+    quoteId: geoProgress.quoteId,
+    ...contact,
+    email: 'geo@example.com',
+    address: typed,
+  }, '198.51.100.36');
+  const geoBody = await geoGate.json();
+  const geoLines = await waitFor(on.log, (lines) => parsed(lines, 'api.resend.com').some((body) => body.to?.[0] === 'geo@example.com'));
+  const geoMail = parsed(geoLines, 'api.resend.com').find((body) => body.to?.[0] === 'geo@example.com');
+  const geoBlob = `${geoMail?.html || ''}\n${geoMail?.text || ''}`;
+  check(
+    'customer email uses the geocoded address, not the typed gate address',
+    geoGate.status === 200 && geoBody.leadCreated === true && geoBody.address === typed && geoBlob.includes(geocoded) && !geoBlob.includes(typed),
+    `status=${geoGate.status} lead=${geoBody.leadCreated}`,
+  );
 
   const empty = startServer(4043, {
     CUSTOMER_ESTIMATE_EMAIL_ENABLED: 'true',
