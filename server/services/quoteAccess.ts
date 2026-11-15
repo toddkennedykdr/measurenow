@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import type { RoofQuote } from './pricing';
+import { maybeSendCustomerEstimateEmail } from './customerEstimateEmail';
 
 /** How long a gated quote can be re-opened without sending another lead. */
 export const ACCESS_TTL_MS = 30 * 60 * 1000;
@@ -297,6 +298,18 @@ export async function openQuoteForContact(session: Session, contact: ContactInpu
     }
 
     rememberLead(current, contact, fingerprint, true);
+    if (process.env.CUSTOMER_ESTIMATE_EMAIL_ENABLED === 'true') {
+      maybeSendCustomerEstimateEmail({
+        to: contact.email.trim(),
+        name: contact.name.trim(),
+        address: contact.address.trim(),
+        roofSqFt: current.roof.totalAreaSqFt,
+        hdzEstimate: current.quote.hdzEstimate,
+        uhdzEstimate: current.quote.uhdzEstimate,
+        lat: current.lat,
+        lng: current.lng,
+      });
+    }
     const token = signQuoteToken(current.id, current.expiresAt);
     return { ok: true as const, leadCreated: true, token, body: pricedBody(current) };
   }));
