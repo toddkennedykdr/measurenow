@@ -49,8 +49,9 @@ const LOGO_PATH_ENV = 'CUSTOMER_EMAIL_LOGO_PATH';
 const BADGE_PATH_ENV = 'CUSTOMER_EMAIL_MASTER_ELITE_IMAGE_PATH';
 
 const SNAPSHOT_CID = 'house-snapshot';
-const FIRST_NAME_MAX = 40;
 const GREETING_FALLBACK = 'Hi there,';
+/** First name: one letter, then up to 39 letters, apostrophes, hyphens, or spaces. */
+const FIRST_NAME_ALLOW = /^[\p{L}][\p{L}'\- ]{0,39}$/u;
 /**
  * Postal address from toddkennedykdr/kd-website main, src/data/business.ts.
  * streetAddress is "8601 Six Forks Rd., Suite 400".
@@ -147,26 +148,10 @@ function oneLine(value: string): string {
   return value.replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function isPhoneLike(value: string): boolean {
-  const digits = value.replace(/\D/g, '');
-  if (digits.length < 7) return false;
-  return value.replace(/[\d\s().+\-]/g, '').length === 0;
-}
-
-function isUnsafeNameToken(token: string): boolean {
-  if (token.includes('@')) return true;
-  if (/https?:\/\//i.test(token) || /^www\./i.test(token)) return true;
-  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(token)) return true;
-  return isPhoneLike(token);
-}
-
-/** First name only, at most 40 characters. Unsafe names become "Hi there,". */
+/** First token only, and only when it is on the name allowlist. */
 export function customerGreeting(name: string): string {
-  const cleaned = oneLine(name);
-  const tokens = cleaned.split(' ').filter(Boolean);
-  if (!tokens.length || tokens.some(isUnsafeNameToken) || isPhoneLike(cleaned)) return GREETING_FALLBACK;
-  const first = tokens[0].slice(0, FIRST_NAME_MAX);
-  if (!first) return GREETING_FALLBACK;
+  const first = oneLine(name).split(' ').filter(Boolean)[0] ?? '';
+  if (!FIRST_NAME_ALLOW.test(first)) return GREETING_FALLBACK;
   return `Hi ${first},`;
 }
 

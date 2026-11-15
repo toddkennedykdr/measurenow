@@ -91,14 +91,6 @@ function sweep(now = Date.now()) {
   }
 }
 
-/** Geocoded formatted address. The gate form address is never used as a fallback. */
-export function geocodedAddressFrom(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (trimmed.length < 5 || trimmed.length > 300) return null;
-  return trimmed;
-}
-
 export function createQuoteSession(input: {
   lat: number;
   lng: number;
