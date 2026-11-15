@@ -19,9 +19,6 @@ export interface QuoteResponse {
     wasteFactor: number;
     hdzEstimate: number;
     uhdzEstimate: number;
-    hdzPricePerSquare: number;
-    uhdzUpgradePerSquare: number;
-    uhdzPricePerSquare: number;
     lowEstimate: number;
     highEstimate: number;
     avgPitchDegrees: number;

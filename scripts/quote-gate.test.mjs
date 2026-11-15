@@ -47,6 +47,18 @@ const PACKAGE_KEYS = new Set([
   'hdzEstimate', 'uhdzEstimate', 'hdzPricePerSquare', 'uhdzUpgradePerSquare',
   'uhdzPricePerSquare', 'lowEstimate', 'highEstimate', 'quoteLow', 'quoteHigh',
 ]);
+const RATE_KEYS = ['hdzPricePerSquare', 'uhdzUpgradePerSquare', 'uhdzPricePerSquare'];
+const RATE_COPY = ['/sq', 'per square', '$430', '$470'];
+
+function rateTextHits(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? null);
+  const lower = text.toLowerCase();
+  const hits = RATE_COPY.filter((needle) => lower.includes(needle.toLowerCase()));
+  for (const key of RATE_KEYS) {
+    if (text.includes(key)) hits.push(key);
+  }
+  return hits;
+}
 
 let pass = 0;
 let fail = 0;
@@ -186,6 +198,25 @@ try {
   check('direct lead capture still returns success and no prices', direct.status === 200 && directBody.success === true && priceKeys(directBody).length === 0, `status=${direct.status}`);
   const directOutbound = byHost(await waitLeadOutbound());
   check('direct capture calls JobNimbus and Resend stubs', Boolean(directOutbound['app.jobnimbus.com']) && Boolean(directOutbound['api.resend.com']));
+  const alert = directOutbound['api.resend.com'];
+  const alertHtml = String(alert?.html || '');
+  const rangeMatch = alertHtml.match(/Quote Range<\/td><td[^>]*>\$([0-9,]+) – \$([0-9,]+)/);
+  const alertLow = rangeMatch ? Number(rangeMatch[1].replace(/,/g, '')) : NaN;
+  const alertHigh = rangeMatch ? Number(rangeMatch[2].replace(/,/g, '')) : NaN;
+  check(
+    'internal lead email keeps the total range and is only to todd@',
+    Array.isArray(alert?.to)
+      && alert.to.length === 1
+      && alert.to[0] === 'todd@kanddroofingnc.com'
+      && alert.to.includes(contact.email) === false
+      && alertHtml.includes('Quote Range')
+      && alertLow === expectedQuote.hdzEstimate
+      && alertHigh === expectedQuote.uhdzEstimate
+      && alertHtml.includes('Roof Sq Ft')
+      && alertHtml.includes(`>${expectedQuote.roofSquares}<`)
+      && rateTextHits(`${alert?.subject || ''}\n${alertHtml}`).length === 0,
+    `to=${JSON.stringify(alert?.to)} range=${rangeMatch?.[0] || 'missing'} hits=${rateTextHits(alertHtml).join(',')}`,
+  );
   fs.writeFileSync(LOG, '');
 
   const quoted = await jpost('/api/roof/quote', { lat: 35.78, lng: -78.64 }, { 'X-Forwarded-For': '198.51.100.22' });
@@ -203,6 +234,7 @@ try {
   const leaked = preGateNumbers.filter((n) => containsNumber(progress, n));
   check('pre-gate quote has no price, square, pitch, or area amounts', leaked.length === 0, leaked.join(','));
   check('pre-gate quote does not include a token', progress.token == null && progress.leadCreated == null);
+  check('pre-gate quote has no per-square rate copy', rateTextHits(progress).length === 0, rateTextHits(progress).join(','));
 
   const earlyToken = signQuoteToken(progress.quoteId, Date.now() + 60_000);
   const early = await jpost('/api/roof/quote-reveal', { token: earlyToken }, { 'X-Forwarded-For': '198.51.100.23' });
@@ -212,7 +244,17 @@ try {
   const gated = await jpost('/api/roof/quote-lead', { quoteId: progress.quoteId, ...contact }, { 'X-Forwarded-For': '198.51.100.24' });
   const gatedBody = await gated.json();
   check('gate submit returns prices', gated.status === 200 && gatedBody.leadCreated === true && gatedBody.quote?.hdzEstimate === expectedQuote.hdzEstimate && gatedBody.quote?.uhdzEstimate === expectedQuote.uhdzEstimate, `status=${gated.status} hdz=${gatedBody.quote?.hdzEstimate}`);
-  check('gate prices match the package fields', gatedBody.quote?.hdzPricePerSquare === 430 && gatedBody.quote?.uhdzPricePerSquare === 470 && gatedBody.quote?.uhdzUpgradePerSquare === 40 && gatedBody.quote?.lowEstimate === expectedQuote.lowEstimate && gatedBody.quote?.highEstimate === expectedQuote.highEstimate);
+  check(
+    'gate prices keep totals and omit per-square rates',
+    gatedBody.quote?.lowEstimate === expectedQuote.lowEstimate
+      && gatedBody.quote?.highEstimate === expectedQuote.highEstimate
+      && gatedBody.quote?.hdzEstimate === expectedQuote.hdzEstimate
+      && gatedBody.quote?.uhdzEstimate === expectedQuote.uhdzEstimate
+      && rateTextHits(gatedBody).length === 0
+      && !containsNumber(gatedBody, 430)
+      && !containsNumber(gatedBody, 470),
+    rateTextHits(gatedBody).join(',') || JSON.stringify(gatedBody.quote),
+  );
   check('gate keeps the address that was submitted', gatedBody.address === contact.address);
   const gateOutbound = byHost(await waitLeadOutbound());
   check(
@@ -250,8 +292,11 @@ try {
       && revealedBody.quote?.hdzEstimate === gatedBody.quote.hdzEstimate
       && revealedBody.quote?.uhdzEstimate === gatedBody.quote.uhdzEstimate
       && revealedBody.address === contact.address
-      && leadLogCount() === 0,
-    `status=${revealed.status} outbound=${leadLogCount()}`,
+      && leadLogCount() === 0
+      && rateTextHits(revealedBody).length === 0
+      && !containsNumber(revealedBody, 430)
+      && !containsNumber(revealedBody, 470),
+    `status=${revealed.status} outbound=${leadLogCount()} hits=${rateTextHits(revealedBody).join(',')}`,
   );
 
   const missing = await jpost('/api/roof/quote-reveal', {}, { 'X-Forwarded-For': '198.51.100.27' });
@@ -361,9 +406,19 @@ try {
   const html = await (await req('/quote')).text();
   const embedHtml = await (await req('/quote?embed=1')).text();
   const htmlBlob = `${html}\n${embedHtml}`;
-  const htmlHits = ['hdzEstimate', 'uhdzEstimate', 'quoteLow', 'quoteHigh', 'hdzPricePerSquare', '$430', '$470', 'lowEstimate', 'highEstimate', 'roofSquares', 'pitchOver12', 'totalAreaSqFt']
-    .filter((needle) => htmlBlob.includes(needle));
-  check('server-rendered quote HTML has no price fields', html.startsWith('<!DOCTYPE html>') && htmlHits.length === 0, htmlHits.join(','));
+  const htmlHits = ['hdzEstimate', 'uhdzEstimate', 'quoteLow', 'quoteHigh', 'hdzPricePerSquare', 'uhdzPricePerSquare', 'uhdzUpgradePerSquare', '$430', '$470', '/sq', 'per square', 'lowEstimate', 'highEstimate', 'roofSquares', 'pitchOver12', 'totalAreaSqFt']
+    .filter((needle) => htmlBlob.toLowerCase().includes(needle.toLowerCase()));
+  check('server-rendered quote and embed HTML have no price fields', html.startsWith('<!DOCTYPE html>') && embedHtml.startsWith('<!DOCTYPE html>') && htmlHits.length === 0, htmlHits.join(','));
+  const metas = [...htmlBlob.matchAll(/<meta\b[^>]*>/gi)].map((match) => match[0]);
+  const inlineScripts = [...htmlBlob.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/gi)].map((match) => match[0]);
+  const dataAttrs = [...htmlBlob.matchAll(/\sdata-[\w-]+=(?:"[^"]*"|'[^']*')/gi)].map((match) => match[0]);
+  check(
+    'quote meta, inline scripts, and data attributes have no per-square prices',
+    metas.every((tag) => rateTextHits(tag).length === 0)
+      && inlineScripts.every((tag) => rateTextHits(tag).length === 0)
+      && dataAttrs.every((tag) => rateTextHits(tag).length === 0),
+    rateTextHits(htmlBlob).join(','),
+  );
 
   const scripts = [...html.matchAll(/src="([^"]+\.js)"/g)].map((match) => match[1]);
   let bundle = '';
@@ -372,8 +427,13 @@ try {
   }
   check('client bundle is served', bundle.length > 0, `scripts=${scripts.join(',')}`);
   check('client bundle does not call the lead endpoint', !bundle.includes('/api/lead/capture'));
-  const bundlePrices = ['$430', '$470', 'hdzPricePerSquare:430', 'HDZ_PRICE_PER_SQUARE'].filter((needle) => bundle.includes(needle));
-  check('client bundle does not embed package prices', bundlePrices.length === 0, bundlePrices.join(','));
+  const bundlePrices = ['$430', '$470', '/sq', 'per square', 'hdzPricePerSquare', 'uhdzPricePerSquare', 'uhdzUpgradePerSquare', 'HDZ_PRICE_PER_SQUARE'].filter((needle) => bundle.toLowerCase().includes(needle.toLowerCase()));
+  check('client bundle does not embed per-square prices', bundlePrices.length === 0, bundlePrices.join(','));
+  const stylesheets = [...html.matchAll(/href="([^"]+\.css)"/g)].map((match) => match[1]).filter((href) => href.startsWith('/'));
+  let css = '';
+  for (const href of stylesheets) css += await (await req(href)).text();
+  const cssPrices = RATE_COPY.filter((needle) => css.toLowerCase().includes(needle.toLowerCase()));
+  check('client css has no per-square prices', stylesheets.length > 0 && cssPrices.length === 0, cssPrices.join(',') || stylesheets.join(','));
 
   for (const file of ['gaf-timberline-hdz.webp', 'gaf-timberline-uhdz.webp']) {
     const bytes = fs.statSync(path.join(root, 'public/images', file)).size;

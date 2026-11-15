@@ -99,9 +99,6 @@ export function QuoteResult({ data, onStartOver }: Props) {
     const selected = option === tier;
     const name = tier === 'hdz' ? 'GAF Timberline HDZ' : 'GAF Timberline UHDZ';
     const total = tier === 'hdz' ? quote.hdzEstimate : quote.uhdzEstimate;
-    const rate = tier === 'hdz'
-      ? `$${quote.hdzPricePerSquare}/sq`
-      : `+$${quote.uhdzUpgradePerSquare}/sq ($${quote.uhdzPricePerSquare}/sq)`;
     return (
       <button
         key={`${tier}-radio`}
@@ -119,7 +116,6 @@ export function QuoteResult({ data, onStartOver }: Props) {
         </span>
         <span className="quote-option__name">{name}</span>
         <span className="quote-result__price">{formatPrice(total)}</span>
-        <span className={tier === 'uhdz' ? 'quote-option__rate quote-result__upgrade' : 'quote-option__rate'}>{rate}</span>
       </button>
     );
   }
