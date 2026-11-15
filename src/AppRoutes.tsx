@@ -1,3 +1,4 @@
+/// <reference path="./html2pdf.d.ts" />
 import type { ReactElement } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
