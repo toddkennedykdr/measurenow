@@ -13,6 +13,8 @@
     "smoke": "node scripts/smoke-lockdown.mjs && node scripts/smoke-admin.mjs",
     "smoke:admin": "node scripts/smoke-admin.mjs",
     "test:password": "node scripts/password-auth.test.mjs",
+    "test:customer-estimate": "node scripts/customer-estimate-email.test.mjs",
+    "render:customer-estimate": "tsx scripts/render-customer-estimate-email.ts",
     "mint-reset": "tsx scripts/mint-reset.ts"
   },
   "dependencies": {

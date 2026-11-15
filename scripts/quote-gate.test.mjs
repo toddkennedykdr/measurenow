@@ -30,6 +30,8 @@ const env = {
   CAP_LEAD_PUBLIC: '1000',
   CAP_QUOTE_GATE_PUBLIC: '1000',
   EMBED_PARENT_ORIGINS: '',
+  CUSTOMER_ESTIMATE_EMAIL_ENABLED: '',
+  ESTIMATE_EMAIL_SNAPSHOT_ENABLED: '',
   OUTBOUND_LOG: LOG,
   LANG: 'en_US.UTF-8',
 };
@@ -267,7 +269,15 @@ try {
     JSON.stringify(gateOutbound['api.resend.com']) === JSON.stringify(directOutbound['api.resend.com']),
   );
   check('stubbed lead calls are not live', !/ENOTFOUND|ECONNREFUSED/.test(serverLog));
-  const afterFirst = readLog().filter((line) => LEAD_HOSTS.includes(new URL(line.url).host)).length;
+  const gateLines = readLog();
+  const customerMails = gateLines.filter((line) => {
+    if (!line.body || new URL(line.url).host !== 'api.resend.com') return false;
+    const body = JSON.parse(line.body);
+    return Array.isArray(body.to) && body.to.includes(contact.email);
+  });
+  check('flag off does not email the customer', customerMails.length === 0, `customerEmails=${customerMails.length}`);
+  check('flag off does not request a satellite image', !gateLines.some((line) => String(line.url).includes('staticmap')));
+  const afterFirst = gateLines.filter((line) => LEAD_HOSTS.includes(new URL(line.url).host)).length;
   fs.writeFileSync(LOG, '');
 
   const again = await jpost('/api/roof/quote-lead', { quoteId: progress.quoteId, ...contact }, { 'X-Forwarded-For': '198.51.100.24' });

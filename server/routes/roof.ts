@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { geocodeAddress } from '../services/geocode';
+import { geocodeAddress, recallServerGeocode, rememberServerGeocode } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
 import { calculateQuote } from '../services/pricing';
 import { createQuoteSession, progressBody } from '../services/quoteAccess';
@@ -63,6 +63,7 @@ roofRouter.post('/geocode', geocodeIpLimit, geocodeCap, async (req: Request, res
       });
     }
 
+    rememberServerGeocode(location.lat, location.lng, location.formattedAddress);
     return res.json({
       address: location.formattedAddress,
       lat: location.lat,
@@ -95,6 +96,7 @@ roofRouter.post('/quote', quoteIpLimit, quoteCap, async (req: Request, res: Resp
     const session = createQuoteSession({
       lat,
       lng,
+      geocodedAddress: recallServerGeocode(lat, lng),
       quote,
       roof: {
         totalAreaSqFt: Math.round(building.totalAreaSqFt),
