@@ -173,7 +173,21 @@ export function progressBody(session: Session) {
   };
 }
 
-/** Post-gate body. Same quote object the public quote route used to return. */
+/**
+ * Totals and measurements the quote page can show.
+ * Per-square rates stay on the server quote used for the math.
+ */
+export function quoteForCustomer(quote: RoofQuote) {
+  const {
+    hdzPricePerSquare: _hdzPricePerSquare,
+    uhdzUpgradePerSquare: _uhdzUpgradePerSquare,
+    uhdzPricePerSquare: _uhdzPricePerSquare,
+    ...visible
+  } = quote;
+  return visible;
+}
+
+/** Post-gate body. Totals only — no per-square rate fields. */
 export function pricedBody(session: Session) {
   return {
     address: session.address || '',
@@ -189,7 +203,7 @@ export function pricedBody(session: Session) {
       estimatedLength: session.roof.estimatedLength,
       estimatedWidth: session.roof.estimatedWidth,
     },
-    quote: session.quote,
+    quote: quoteForCustomer(session.quote),
   };
 }
 

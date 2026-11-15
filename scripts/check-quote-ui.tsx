@@ -23,6 +23,7 @@ import {
   replyToParentPing,
 } from '../src/quoteChrome';
 import { calculateQuote, HDZ_PRICE_PER_SQUARE, UHDZ_PRICE_PER_SQUARE, UHDZ_UPGRADE_PER_SQUARE } from '../server/services/pricing';
+import { quoteForCustomer } from '../server/services/quoteAccess';
 import {
   HARDCODED_EMBED_ORIGINS,
   canonicalizeEmbedOrigin,
@@ -115,9 +116,6 @@ const quote: FullQuoteData = {
     wasteFactor: 1.15,
     hdzEstimate: 9900,
     uhdzEstimate: 10800,
-    hdzPricePerSquare: 430,
-    uhdzUpgradePerSquare: 40,
-    uhdzPricePerSquare: 470,
     lowEstimate: 9900,
     highEstimate: 10800,
     avgPitchDegrees: 22,
@@ -136,15 +134,24 @@ check(
   'quote result shows HDZ as the selected price',
   result.includes('GAF Timberline HDZ')
     && result.includes('$9,900')
-    && result.includes('$430/sq')
     && !result.includes('$9,900 –')
     && result.indexOf('aria-checked="true"') !== -1
     && result.indexOf('aria-checked="true"') < result.indexOf('GAF Timberline HDZ')
     && result.indexOf('GAF Timberline HDZ') < result.indexOf('aria-checked="false"'),
 );
 check(
-  'quote result shows the UHDZ option at +$40/sq ($470/sq)',
-  result.includes('GAF Timberline UHDZ') && result.includes('+$40/sq ($470/sq)') && result.includes('$10,800'),
+  'quote result shows the UHDZ total',
+  result.includes('GAF Timberline UHDZ') && result.includes('$10,800'),
+);
+const RATE_COPY = ['/sq', 'per square', '$430', '$470'];
+function rateCopyHits(html: string) {
+  const lower = html.toLowerCase();
+  return RATE_COPY.filter((needle) => lower.includes(needle.toLowerCase()));
+}
+check(
+  'quote result hides per-square prices on both cards',
+  rateCopyHits(result).length === 0 && !result.includes('quote-option__rate'),
+  rateCopyHits(result).join(','),
 );
 const includeTexts = QUOTE_INCLUDES.map((item) => item.text);
 const radiogroupHtml = result.slice(result.indexOf('role="radiogroup"'), result.indexOf('quote-panel--hdz'));
@@ -332,9 +339,15 @@ function sourceFiles(dir: string): string[] {
   return found;
 }
 const customerSource = sourceFiles(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src'))
+  .concat(path.join(path.dirname(fileURLToPath(import.meta.url)), '../index.html'))
   .map(file => readFileSync(file, 'utf8'))
   .join('\n');
 check('customer copy has no "no pressure"', !/no pressure/i.test(customerSource));
+check(
+  'customer source has no per-square price copy',
+  rateCopyHits(customerSource).length === 0,
+  rateCopyHits(customerSource).join(','),
+);
 const withoutFullName = customerSource.replace(/K&amp;D Roofing/g, '').replace(/K&D Roofing/g, '');
 check('customer copy does not use a bare K&D', !/K&(?:amp;)?D/.test(withoutFullName));
 
@@ -377,6 +390,83 @@ check('standard roof prices HDZ and UHDZ after 15% waste', standard.hdzEstimate 
 check('pitch of 35 degrees does not add the steep surcharge', atThreshold.hdzEstimate === 9900 && atThreshold.uhdzEstimate === 10800);
 check('pitch over 35 degrees adds 10%', steep.hdzEstimate === 10900 && steep.uhdzEstimate === 11900, JSON.stringify({ hdz: steep.hdzEstimate, uhdz: steep.uhdzEstimate }));
 check('waste factor stays 15%', standard.wasteFactor === 1.15);
+
+const priceSamples: { area: number; pitch: number; hdz: number; uhdz: number; category: string }[] = [
+  { area: 1500, pitch: 18, hdz: 7400, uhdz: 8100, category: 'Standard' },
+  { area: 1500, pitch: 40, hdz: 8200, uhdz: 8900, category: 'Steep' },
+  { area: 3200, pitch: 10, hdz: 15800, uhdz: 17300, category: 'Standard' },
+  { area: 3200, pitch: 36, hdz: 17400, uhdz: 19000, category: 'Steep' },
+  { area: 800, pitch: 22, hdz: 4000, uhdz: 4300, category: 'Standard' },
+  { area: 1000, pitch: 0, hdz: 4900, uhdz: 5400, category: 'Low' },
+  { area: 4500, pitch: 45, hdz: 24500, uhdz: 26800, category: 'Steep' },
+];
+for (const sample of priceSamples) {
+  const priced = calculateQuote(sampleBuilding(sample.area, sample.pitch));
+  check(
+    `${sample.area} sq ft at ${sample.pitch}° keeps the same totals`,
+    priced.hdzEstimate === sample.hdz
+      && priced.uhdzEstimate === sample.uhdz
+      && priced.lowEstimate === sample.hdz
+      && priced.highEstimate === sample.uhdz
+      && priced.pitchCategory === sample.category
+      && priced.wasteFactor === 1.15
+      && priced.hdzPricePerSquare === 430
+      && priced.uhdzPricePerSquare === 470
+      && priced.uhdzUpgradePerSquare === 40,
+    JSON.stringify({ hdz: priced.hdzEstimate, uhdz: priced.uhdzEstimate, category: priced.pitchCategory }),
+  );
+}
+
+function shownQuote(building: BuildingRoofData): FullQuoteData {
+  const priced = quoteForCustomer(calculateQuote(building));
+  return {
+    address: '1 Test St, Raleigh, NC',
+    lat: 35.78,
+    lng: -78.64,
+    roofData: {
+      totalAreaSqFt: priced.totalAreaSqFt,
+      segments: 2,
+      avgPitchDegrees: priced.avgPitchDegrees,
+      imageryQuality: 'HIGH',
+    },
+    quote: priced,
+  };
+}
+const steepCard = renderToString(<QuoteResult data={shownQuote(sampleBuilding(2000, 40))} />);
+const smallCard = renderToString(<QuoteResult data={shownQuote(sampleBuilding(800, 22))} />);
+const customerCards = `${result}\n${steepCard}\n${smallCard}`;
+check(
+  'quote cards keep sample totals and hide per-square rates',
+  steepCard.includes('$10,900')
+    && steepCard.includes('$11,900')
+    && smallCard.includes('$4,000')
+    && smallCard.includes('$4,300')
+    && rateCopyHits(customerCards).length === 0,
+  rateCopyHits(customerCards).join(','),
+);
+const visibleStandard = quoteForCustomer(standard);
+check(
+  'customer quote payload drops per-square rate fields',
+  !('hdzPricePerSquare' in visibleStandard)
+    && !('uhdzUpgradePerSquare' in visibleStandard)
+    && !('uhdzPricePerSquare' in visibleStandard)
+    && visibleStandard.hdzEstimate === 9900
+    && visibleStandard.uhdzEstimate === 10800
+    && visibleStandard.lowEstimate === 9900
+    && visibleStandard.highEstimate === 10800
+    && standard.hdzPricePerSquare === 430
+    && standard.uhdzUpgradePerSquare === 40
+    && standard.uhdzPricePerSquare === 470,
+);
+const visibleSteep = quoteForCustomer(steep);
+check(
+  'steep customer quote payload keeps the 10% totals only',
+  visibleSteep.hdzEstimate === 10900
+    && visibleSteep.uhdzEstimate === 11900
+    && !('hdzPricePerSquare' in visibleSteep)
+    && rateCopyHits(JSON.stringify(visibleSteep)).length === 0,
+  rateCopyHits(JSON.stringify(visibleSteep)).join(','),
+);
 
 const hardcoded = [...HARDCODED_EMBED_ORIGINS];
 const silent: string[] = [];
