@@ -6,6 +6,8 @@ import { AuthProvider } from '../src/context/AuthContext';
 import App from '../src/App';
 import { NavBar } from '../src/components/NavBar';
 import { QuoteResult } from '../src/components/QuoteResult';
+import { spawn } from 'node:child_process';
+import { QuoteGate, firstInvalidGateField } from '../src/components/QuoteGate';
 import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../src/quoteIncludes';
 import type { FullQuoteData } from '../src/types';
 import {
@@ -30,7 +32,7 @@ import {
   readEmbedParentOrigins,
 } from '../server/embedOrigins';
 import type { BuildingRoofData } from '../server/services/solar';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -108,7 +110,7 @@ const quote: FullQuoteData = {
     materialNote: 'Architectural shingles',
   },
 };
-const result = renderToString(<QuoteResult data={quote} onLeadSubmitted={() => {}} />);
+const result = renderToString(<QuoteResult data={quote} />);
 check(
   'quote result has the call link',
   result.includes('href="tel:+19199774074"') && result.includes('Call K&amp;D Roofing: (919) 977-4074'),
@@ -190,10 +192,61 @@ check(
     && countText(result, 'rel="noopener noreferrer"') === 2
     && countText(result, 'Click here to apply') === 2,
 );
+const ALLOWED_QUOTE_IMAGES = [
+  '/images/gaf-timberline-hdz.webp',
+  '/images/gaf-timberline-uhdz.webp',
+] as const;
+const quoteImgs = [...result.matchAll(/<img\b[^>]*>/gi)].map((match) => match[0]);
+function imageSrc(tag: string) {
+  const match = tag.match(/src="([^"]+)"/);
+  return match ? match[1] : '';
+}
 check(
-  'quote screen renders no images',
-  !/<img\b/i.test(result),
+  'quote screen images are only the two GAF product photos',
+  quoteImgs.length === 2
+    && quoteImgs.every((tag) => (ALLOWED_QUOTE_IMAGES as readonly string[]).includes(imageSrc(tag)))
+    && new Set(quoteImgs.map(imageSrc)).size === 2
+    && quoteImgs.every((tag) => tag.includes('loading="lazy"'))
+    && quoteImgs.every((tag) => tag.includes('width="800"') && tag.includes('height="315"'))
+    && quoteImgs.every((tag) => !/logo/i.test(tag))
+    && result.includes('alt="Home roof with GAF Timberline HDZ shingles"')
+    && result.includes('alt="Home roof with GAF Timberline UHDZ shingles"'),
+  quoteImgs.join(' | '),
 );
+const quoteImageDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/images');
+const quoteImageFiles = readdirSync(quoteImageDir).filter((name) => !name.startsWith('.'));
+check(
+  'public quote images are exactly the two GAF product photos',
+  quoteImageFiles.length === 2
+    && quoteImageFiles.includes('gaf-timberline-hdz.webp')
+    && quoteImageFiles.includes('gaf-timberline-uhdz.webp'),
+  quoteImageFiles.join(', '),
+);
+check('address step does not render package photos', !unframed.includes('/images/gaf-timberline-') && !embed.includes('/images/gaf-timberline-'));
+const gateHtml = renderToString(
+  <QuoteGate address="1 Test St, Raleigh, NC" submitting={false} serverError="" onSubmit={() => {}} />,
+);
+check(
+  'gate form has contact fields and no prices or photos',
+  gateHtml.includes('See your estimate')
+    && gateHtml.includes('K&amp;D Roofing')
+    && gateHtml.includes('id="gate-name"')
+    && gateHtml.includes('id="gate-phone"')
+    && gateHtml.includes('id="gate-email"')
+    && gateHtml.includes('id="gate-address"')
+    && gateHtml.includes('1 Test St, Raleigh, NC')
+    && !/<img\b/i.test(gateHtml)
+    && !gateHtml.includes('$')
+    && !/no pressure/i.test(gateHtml),
+);
+const preGatePages = `${unframed}\n${embed}\n${framedHtml}\n${gateHtml}`;
+check(
+  'pre-gate pages do not show squares, pitch, area, or prices',
+  !/roofSquares|pitchOver12|pitchCategory|Sq Ft|\bSquares\b|\$\d|10,600|11,600/.test(preGatePages),
+);
+check('gate focus order starts at the first invalid field', firstInvalidGateField({ name: 'Name is required.', phone: 'Please enter a valid US phone number.' }) === 'name');
+check('gate focus moves past a valid name', firstInvalidGateField({ phone: 'Please enter a valid US phone number.', email: 'Please enter a valid email.' }) === 'phone');
+check('gate focus reaches email before address', firstInvalidGateField({ email: 'Please enter a valid email.', address: 'Please enter a valid address.' }) === 'email');
 check(
   'quote result names GAF Master Elite in plain text',
   result.includes(GAF_MASTER_ELITE_LABEL) && result.includes(`Contractor ID ${GAF_CONTRACTOR_ID}`),
@@ -391,4 +444,204 @@ const strangerPing = replyToParentPing(
 );
 check('untrusted origin and non-parent source get no ping reply', !untrustedPing && !strangerPing && calls.length === 0);
 
-if (failed) process.exit(1);
+runGateFocusCheck().then(() => {
+  if (failed) process.exit(1);
+}).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+
+function pageLeak(value: string) {
+  return /\$\s?\d|roofSquares|pitchOver12|pitchCategory|Sq Ft|\bSquares\b|sqft|10,600|11,600|\b24\.8\b|\b4\.8\/12\b/.test(value);
+}
+
+async function runGateFocusCheck() {
+  const uiPort = 15000 + (process.pid % 1000);
+  const chromePort = 17000 + (process.pid % 1000);
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const srv = spawn(process.execPath, ['-r', path.join(root, 'scripts/fetch-stub.cjs'), path.join(root, 'dist-server/index.js')], {
+    cwd: root,
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      PORT: String(uiPort),
+      SKIP_DB_INIT: '1',
+      GOOGLE_SOLAR_API_KEY: 'test-not-a-key',
+      ANTHROPIC_API_KEY: '',
+      RESEND_API_KEY: '',
+      JN_API_KEY: '',
+      SESSION_SECRET: 'smoke-test-only',
+      CAP_QUOTE_PUBLIC: '100',
+      CAP_LEAD_PUBLIC: '100',
+      CAP_QUOTE_GATE_PUBLIC: '100',
+      EMBED_PARENT_ORIGINS: '',
+    },
+    stdio: 'ignore',
+  });
+  const chromeBin = process.env.QUOTE_UI_CHROME || '/usr/bin/google-chrome';
+  const userDataDir = path.join('/tmp', `quote-ui-chrome-${process.pid}`);
+  const chrome = spawn(chromeBin, [
+    '--headless=new',
+    '--no-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--disable-sync',
+    '--disable-default-apps',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-breakpad',
+    '--disable-crash-reporter',
+    '--disable-client-side-phishing-detection',
+    '--disable-domain-reliability',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-extensions',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-translate',
+    '--metrics-recording-only',
+    '--disable-features=Translate,AutofillServerCommunication,OptimizationHints,MediaRouter,InterestFeedContentSuggestions',
+    `--remote-debugging-port=${chromePort}`,
+    `--user-data-dir=${userDataDir}`,
+    'about:blank',
+  ], { stdio: 'ignore', detached: true });
+  let socket: WebSocket | null = null;
+  try {
+    const base = `http://127.0.0.1:${uiPort}`;
+    let up = false;
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`${base}/quote`); up = true; break; } catch { await new Promise((resolve) => setTimeout(resolve, 100)); }
+    }
+    check('quote ui server booted for the focus check', up);
+    if (!up) return;
+    let version: { webSocketDebuggerUrl?: string } | null = null;
+    for (let i = 0; i < 50; i++) {
+      try {
+        version = await (await fetch(`http://127.0.0.1:${chromePort}/json/version`)).json();
+        if (version?.webSocketDebuggerUrl) break;
+      } catch { await new Promise((resolve) => setTimeout(resolve, 100)); }
+    }
+    check('quote ui browser booted for the focus check', Boolean(version?.webSocketDebuggerUrl));
+    if (!version?.webSocketDebuggerUrl) return;
+    socket = new WebSocket(version.webSocketDebuggerUrl);
+    await new Promise<void>((resolve, reject) => {
+      socket!.addEventListener('open', () => resolve());
+      socket!.addEventListener('error', () => reject(new Error('browser socket failed')));
+    });
+    let seq = 0;
+    const waiters = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data));
+      const waiter = message.id ? waiters.get(message.id) : undefined;
+      if (!waiter) return;
+      waiters.delete(message.id);
+      if (message.error) waiter.reject(new Error(JSON.stringify(message.error)));
+      else waiter.resolve(message.result);
+    });
+    const send = (method: string, params: Record<string, unknown> = {}, sessionId?: string) => new Promise<any>((resolve, reject) => {
+      const id = ++seq;
+      waiters.set(id, { resolve, reject });
+      const payload: Record<string, unknown> = { id, method, params };
+      if (sessionId) payload.sessionId = sessionId;
+      socket!.send(JSON.stringify(payload));
+    });
+    const created = await send('Target.createTarget', { url: `${base}/quote` });
+    const attached = await send('Target.attachToTarget', { targetId: created.targetId, flatten: true });
+    const sessionId = attached.sessionId as string;
+    await send('Runtime.enable', {}, sessionId);
+    const evaluated = await send('Runtime.evaluate', {
+      expression: `(() => {
+        const setVal = (el, value) => {
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          setter.call(el, value);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const waitFor = (label, pred) => new Promise((resolve, reject) => {
+          const start = Date.now();
+          const tick = () => {
+            try {
+              const found = pred();
+              if (found) resolve(found);
+              else if (Date.now() - start > 15000) reject(new Error('timeout ' + label));
+              else setTimeout(tick, 50);
+            } catch (err) { reject(err); }
+          };
+          tick();
+        });
+        const store = () => ({ session: { ...sessionStorage }, local: { ...localStorage } });
+        return (async () => {
+          const address = await waitFor('address', () => document.querySelector('#address'));
+          setVal(address, '1 Test St, Raleigh, NC');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          address.form.requestSubmit();
+          const confirm = await waitFor('confirm', () => [...document.querySelectorAll('button')].find((button) => /Yes, Get My Quote|Confirm This Location/.test(button.textContent || '')));
+          confirm.click();
+          await waitFor('gate', () => document.querySelector('#gate-name'));
+          const before = { html: document.documentElement.outerHTML, text: document.body.innerText, ...store() };
+          document.querySelector('#gate-name').form.requestSubmit();
+          const nameField = await waitFor('name focus', () => document.activeElement && document.activeElement.id === 'gate-name' ? document.activeElement : null);
+          const first = {
+            active: nameField.id,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map((el) => el.textContent),
+            invalid: nameField.getAttribute('aria-invalid'),
+            describedby: nameField.getAttribute('aria-describedby'),
+          };
+          setVal(nameField, 'Jane Homeowner');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          nameField.form.requestSubmit();
+          const phoneField = await waitFor('phone focus', () => document.activeElement && document.activeElement.id === 'gate-phone' ? document.activeElement : null);
+          return { before, first, secondActive: phoneField.id, after: { html: document.documentElement.outerHTML, text: document.body.innerText, ...store() } };
+        })();
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    }, sessionId);
+    if (evaluated.exceptionDetails) {
+      check('gate error moves focus to the first invalid field', false, JSON.stringify(evaluated.exceptionDetails).slice(0, 500));
+      return;
+    }
+    const value = evaluated.result?.value;
+    const blobs = [
+      value?.before?.html, value?.before?.text, JSON.stringify(value?.before?.session), JSON.stringify(value?.before?.local),
+      value?.after?.html, value?.after?.text, JSON.stringify(value?.after?.session), JSON.stringify(value?.after?.local),
+    ];
+    check(
+      'pre-gate dom and storage hide squares, pitch, area, and prices',
+      blobs.every((blob) => typeof blob === 'string' && !pageLeak(blob))
+        && Object.keys(value.before.session).length === 0
+        && Object.keys(value.before.local).length === 0
+        && Object.keys(value.after.session).length === 0
+        && Object.keys(value.after.local).length === 0,
+      blobs.find((blob) => typeof blob === 'string' && pageLeak(blob))?.slice(0, 240) || '',
+    );
+    check(
+      'gate error moves focus to the first invalid field',
+      value.first.active === 'gate-name'
+        && value.first.invalid === 'true'
+        && value.first.describedby === 'gate-name-error'
+        && value.first.alerts.some((text: string) => text.includes('Name is required.'))
+        && value.secondActive === 'gate-phone',
+      JSON.stringify({ first: value.first, second: value.secondActive }),
+    );
+  } catch (err) {
+    check('gate error moves focus to the first invalid field', false, err instanceof Error ? err.message : String(err));
+  } finally {
+    socket?.close();
+    srv.kill('SIGKILL');
+    try {
+      if (chrome.pid) process.kill(-chrome.pid, 'SIGKILL');
+    } catch {
+      chrome.kill('SIGKILL');
+    }
+    await new Promise((resolve) => {
+      if (chrome.exitCode != null || chrome.signalCode != null) resolve(undefined);
+      else {
+        chrome.once('exit', () => resolve(undefined));
+        setTimeout(resolve, 2000);
+      }
+    });
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+}

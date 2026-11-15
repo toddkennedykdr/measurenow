@@ -62,6 +62,19 @@ export async function initDb() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      token_hash TEXT NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      used_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS password_resets_token_hash_idx ON password_resets (token_hash);
+    CREATE INDEX IF NOT EXISTS password_resets_user_id_idx ON password_resets (user_id);
+  `);
+
   const count = await pool.query(`SELECT COUNT(*)::int AS n FROM users`);
   const userCount = count.rows[0]?.n ?? 0;
   const seed = shouldSeedAdmin(userCount, process.env.SEED_ADMIN_PASSWORD);

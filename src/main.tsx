@@ -12,6 +12,8 @@ import UsersPage from './pages/admin/UsersPage';
 import InvitesPage from './pages/admin/InvitesPage';
 import OrdersPage from './pages/admin/OrdersPage';
 import InviteAcceptPage from './pages/InviteAcceptPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
+import ChangePasswordPage from './pages/ChangePasswordPage';
 import './styles.css';
 
 // Staff-only pages: the rep inspection tool's APIs now require login.
@@ -41,6 +43,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/:id" element={<ReportDetailPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
+          <Route path="/reset/:token" element={<ResetPasswordPage />} />
+          <Route path="/account/password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
           <Route path="/admin/users" element={<RequireAdmin><UsersPage /></RequireAdmin>} />
           <Route path="/admin/invites" element={<RequireAdmin><InvitesPage /></RequireAdmin>} />
           <Route path="/admin/orders" element={<RequireAdmin><OrdersPage /></RequireAdmin>} />

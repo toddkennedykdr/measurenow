@@ -2,8 +2,10 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
-import { calculateQuote, type RoofQuote } from '../services/pricing';
+import { calculateQuote } from '../services/pricing';
+import { createQuoteSession, progressBody } from '../services/quoteAccess';
 import { perIpLimit, dailyCap } from '../middleware/security';
+import { mountQuoteGate } from './quoteGate';
 
 export const roofRouter = Router();
 
@@ -90,11 +92,11 @@ roofRouter.post('/quote', quoteIpLimit, quoteCap, async (req: Request, res: Resp
     }
 
     const quote = calculateQuote(building);
-
-    return res.json({
+    const session = createQuoteSession({
       lat,
       lng,
-      roofData: {
+      quote,
+      roof: {
         totalAreaSqFt: Math.round(building.totalAreaSqFt),
         segments: building.segments.length,
         avgPitchDegrees: Math.round(building.avgPitch * 10) / 10,
@@ -104,8 +106,11 @@ roofRouter.post('/quote', quoteIpLimit, quoteCap, async (req: Request, res: Resp
         estimatedLength: building.estimatedLength,
         estimatedWidth: building.estimatedWidth,
       },
-      quote,
     });
+
+    // Prices stay on the server until POST /quote-lead accepts the contact.
+    res.set('Cache-Control', 'no-store');
+    return res.json(progressBody(session));
   } catch (err: any) {
     console.error('Quote error:', err.message || err);
     return res.status(500).json({
@@ -113,3 +118,5 @@ roofRouter.post('/quote', quoteIpLimit, quoteCap, async (req: Request, res: Resp
     });
   }
 });
+
+mountQuoteGate(roofRouter);

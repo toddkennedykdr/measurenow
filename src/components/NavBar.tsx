@@ -45,6 +45,7 @@ export function NavBar() {
             {!hideStaffLinks && item('/inspect', 'Inspection Tool', path === '/inspect')}
           </>
         )}
+        {user && !hideStaffLinks && item('/account/password', 'Change password', path === '/account/password')}
         {user && !hideStaffLinks ? (
           <button type="button" className="appbar__link" onClick={handleLogout}>
             Logout ({user.name})

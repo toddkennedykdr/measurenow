@@ -11,7 +11,9 @@
     "start": "node dist-server/index.js",
     "preview": "vite preview",
     "smoke": "node scripts/smoke-lockdown.mjs && node scripts/smoke-admin.mjs",
-    "smoke:admin": "node scripts/smoke-admin.mjs"
+    "smoke:admin": "node scripts/smoke-admin.mjs",
+    "test:password": "node scripts/password-auth.test.mjs",
+    "mint-reset": "tsx scripts/mint-reset.ts"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",
