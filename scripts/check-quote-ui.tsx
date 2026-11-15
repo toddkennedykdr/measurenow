@@ -3,6 +3,7 @@ import React, { type ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../src/context/AuthContext';
+import { AppRoutes } from '../src/AppRoutes';
 import App from '../src/App';
 import { NavBar } from '../src/components/NavBar';
 import { QuoteResult } from '../src/components/QuoteResult';
@@ -49,6 +50,21 @@ function render(entry: string, node: ReactNode) {
     </MemoryRouter>,
   );
 }
+
+const INVALID_RESET = 'This reset link is invalid or has expired';
+function showsInvalidReset(html: string) {
+  return html.includes(INVALID_RESET)
+    && html.includes('href="/login"')
+    && html.includes('>Sign in<')
+    && !html.includes('Checking this reset link')
+    && !html.includes('Update password');
+}
+const bareReset = render('/reset', <AppRoutes />);
+const queryReset = render('/reset?token=x', <AppRoutes />);
+check('bare /reset shows the invalid reset link', showsInvalidReset(bareReset));
+check('/reset?token=x shows the invalid reset link', showsInvalidReset(queryReset) && bareReset === queryReset);
+const tokenReset = render('/reset/not-a-token', <AppRoutes />);
+check('/reset/:token still renders the reset page', tokenReset.includes('Checking this reset link') && tokenReset.includes('Choose a new MeasureNow password') && !tokenReset.includes(INVALID_RESET));
 
 const TAGLINE = 'Serving North Carolina since 2017';
 const unframed = render('/quote', <App />);
@@ -508,6 +524,61 @@ async function runGateFocusCheck() {
     'about:blank',
   ], { stdio: 'ignore', detached: true });
   let socket: WebSocket | null = null;
+  const killQuoteUiProcesses = () => {
+    try { socket?.close(); } catch { /* already closed */ }
+    const chromePid = chrome.pid;
+    if (chromePid && chrome.exitCode == null && chrome.signalCode == null) {
+      try {
+        process.kill(-chromePid, 'SIGKILL');
+      } catch {
+        try { chrome.kill('SIGKILL'); } catch { /* already gone */ }
+      }
+    }
+    if (srv.exitCode == null && srv.signalCode == null) {
+      try { srv.kill('SIGKILL'); } catch { /* already gone */ }
+    }
+  };
+  const removeQuoteUiProfile = () => {
+    try { rmSync(userDataDir, { recursive: true, force: true }); } catch { /* already gone */ }
+  };
+  const cleanupQuoteUiNow = () => {
+    killQuoteUiProcesses();
+    removeQuoteUiProfile();
+  };
+  let cleanupPromise: Promise<void> | null = null;
+  const cleanupQuoteUi = () => {
+    if (!cleanupPromise) {
+      cleanupPromise = (async () => {
+        killQuoteUiProcesses();
+        if (chrome.exitCode == null && chrome.signalCode == null && chrome.pid) {
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, 2000);
+            chrome.once('exit', () => { clearTimeout(timer); resolve(); });
+          });
+        }
+        removeQuoteUiProfile();
+      })();
+    }
+    return cleanupPromise;
+  };
+  let quoteUiStopping = false;
+  const requestStop = (code: number) => {
+    void cleanupQuoteUi().finally(() => {
+      if (quoteUiStopping) return;
+      quoteUiStopping = true;
+      process.exit(code);
+    });
+  };
+  process.on('SIGINT', () => requestStop(130));
+  process.on('SIGTERM', () => requestStop(143));
+  process.on('exit', () => { cleanupQuoteUiNow(); });
+  chrome.on('error', () => {
+    if (quoteUiStopping) return;
+    quoteUiStopping = true;
+    console.error(`Chrome not found at ${chromeBin}; set QUOTE_UI_CHROME`);
+    cleanupQuoteUiNow();
+    process.exit(1);
+  });
   try {
     const base = `http://127.0.0.1:${uiPort}`;
     let up = false;
@@ -628,20 +699,6 @@ async function runGateFocusCheck() {
   } catch (err) {
     check('gate error moves focus to the first invalid field', false, err instanceof Error ? err.message : String(err));
   } finally {
-    socket?.close();
-    srv.kill('SIGKILL');
-    try {
-      if (chrome.pid) process.kill(-chrome.pid, 'SIGKILL');
-    } catch {
-      chrome.kill('SIGKILL');
-    }
-    await new Promise((resolve) => {
-      if (chrome.exitCode != null || chrome.signalCode != null) resolve(undefined);
-      else {
-        chrome.once('exit', () => resolve(undefined));
-        setTimeout(resolve, 2000);
-      }
-    });
-    rmSync(userDataDir, { recursive: true, force: true });
+    await cleanupQuoteUi();
   }
 }
