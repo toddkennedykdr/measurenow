@@ -151,9 +151,31 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+function clientStatus(err: unknown): number | null {
+  if (err instanceof URIError) return 400;
+  if (!err || typeof err !== 'object') return null;
+  const raw = (err as { status?: unknown; statusCode?: unknown }).status
+    ?? (err as { statusCode?: unknown }).statusCode;
+  const status = typeof raw === 'number' ? raw : NaN;
+  if (status >= 400 && status < 500) return status;
+  return null;
+}
+
+function clientMessage(status: number): string {
+  if (status === 413) return 'Payload too large';
+  if (status === 415) return 'Unsupported media type';
+  return 'Bad request';
+}
+
 app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   if (res.headersSent) {
     next(err);
+    return;
+  }
+  const status = clientStatus(err);
+  if (status) {
+    console.debug(JSON.stringify({ type: 'client-error', method: req.method, status }));
+    res.status(status).json({ error: clientMessage(status) });
     return;
   }
   console.error(JSON.stringify({ type: 'request-error', method: req.method, route: safeRoute(req), code: safeErrorCode(err) }));

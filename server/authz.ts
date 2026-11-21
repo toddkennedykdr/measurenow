@@ -48,6 +48,22 @@ export function controlCharProblem(value: unknown): string | null {
   return null;
 }
 
+/** True when any string in a JSON value contains a C0 or C1 control character. */
+export function controlCharIn(value: unknown): boolean {
+  if (typeof value === 'string') return CONTROL_CHARS.test(value);
+  if (Array.isArray(value)) return value.some(controlCharIn);
+  if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(controlCharIn);
+  return false;
+}
+
+/** Serial ids are positive 32-bit integers. `14abc`, `1e3`, and oversized values are not. */
+export function strictRowId(raw: unknown): number | null {
+  if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw)) return null;
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id) || id > 2147483647) return null;
+  return id;
+}
+
 export function passwordProblem(password: unknown): string | null {
   const controls = controlCharProblem(password);
   if (controls) return controls;
