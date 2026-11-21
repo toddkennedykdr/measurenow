@@ -21,6 +21,7 @@ const {
   emailProblem, nameProblem, publicUser, summarizeOrder,
   decidePasswordReset, newResetToken, hashResetToken, resetTokenProblem, parseResetHours,
   mintResetUserAllowed, passwordResetError, RESET_LINK_ERROR, RESET_MAX_HOURS, RESET_TOKEN_BYTES,
+  controlCharProblem, CONTROL_CHAR_ERROR,
 } = authz;
 
 check('logged out is 401', accessDecision(null, true) === 401);
@@ -43,6 +44,8 @@ const wrongToken = token.slice(0, -1) + flippedLast;
 check('token match is exact', wrongToken !== token && tokenMatches(hash, token) && !tokenMatches(hash, wrongToken));
 check('malformed token rejected before a lookup', inviteTokenProblem('nope') === 'Invite link is invalid' && inviteTokenProblem(token) === null);
 check('password under 12 rejected', passwordProblem('short') != null && passwordProblem('long-enough-pw') === null);
+check('control characters are rejected before a query', controlCharProblem('ok') === null && controlCharProblem('bad\u0000') === CONTROL_CHAR_ERROR && controlCharProblem('bad\u007f') === CONTROL_CHAR_ERROR && controlCharProblem('bad\u0085') === CONTROL_CHAR_ERROR);
+check('name email and password reject controls', nameProblem('Ada\u0000') === CONTROL_CHAR_ERROR && emailProblem('a\u0000@b.co') === CONTROL_CHAR_ERROR && passwordProblem('long-enough\u0000pw') === CONTROL_CHAR_ERROR && usernameProblem('Ada\u0000') === CONTROL_CHAR_ERROR);
 check('invite lives 7 days', INVITE_TTL_MS === 7 * 24 * 60 * 60 * 1000);
 
 const future = new Date(Date.now() + 60_000);

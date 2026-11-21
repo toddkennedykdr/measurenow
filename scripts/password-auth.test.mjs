@@ -79,6 +79,7 @@ function childEnv(extra = {}) {
     NODE_ENV: 'development',
     SESSION_SECRET: 'password-test-only',
     SEED_ADMIN_PASSWORD: '',
+    ROUTE_FAULT: '1',
     TZ: 'UTC',
     ...extra,
   };
@@ -94,8 +95,10 @@ async function jpost(pathname, body, { ip, cookie } = {}) {
     .join('; ');
   return { status: res.status, data, cookie: setCookie || cookie || '' };
 }
-async function jget(pathname, { ip } = {}) {
-  const res = await fetch(BASE + pathname, { headers: { 'x-forwarded-for': ip || nextIp() } });
+async function jget(pathname, { ip, cookie } = {}) {
+  const headers = { 'x-forwarded-for': ip || nextIp() };
+  if (cookie) headers.cookie = cookie;
+  const res = await fetch(BASE + pathname, { headers });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
 }
@@ -450,6 +453,31 @@ async function main() {
     const keeperAfterSym = await jget(`/api/auth/reset-password/${encodeURIComponent(keeper)}`);
     check('symlink output is refused', sym.status === 1 && (sym.stderr || '').includes('Could not write the reset link file.'));
     check('symlink refusal leaves the database unchanged', outputHides(`${sym.stdout || ''}\n${sym.stderr || ''}`, [keeper]) && afterSym === beforeBlocked && keeperAfterSym.status === 200 && fs.lstatSync(symlink).isSymbolicLink() && fs.readFileSync(sentinel, 'utf8') === 'sentinel-keep\n');
+
+    const probe = 'probeNUL9f3a';
+    const nulUser = await jpost('/api/auth/login', { username: `Todd\u0000${probe}`, password: 'x' });
+    const nulPass = await jpost('/api/auth/login', { username: 'Todd', password: `x\u0000${probe}` });
+    const stillUp = await jget('/api/auth/me');
+    check('nul username is rejected', nulUser.status === 400 && nulUser.data.error === 'Invalid characters' && !JSON.stringify(nulUser.data).includes(probe));
+    check('nul password is rejected', nulPass.status === 400 && nulPass.data.error === 'Invalid characters');
+    check('server stays up after a nul login', stillUp.status === 401);
+
+    const toddNow = await jpost('/api/auth/login', { username: 'Todd', password: PW.reset });
+    const inviteNul = await jpost('/api/admin/invites', {
+      name: `Ada\u0000${probe}`,
+      username: 'newname',
+      email: `a\u0000@b.co`,
+    }, { cookie: toddNow.cookie });
+    const acceptNul = await jpost('/api/auth/accept-invite', { token: `${probe}\u0000`, password: `long-enough-pw\u0000${probe}` });
+    check('invite with a nul is rejected', toddNow.status === 200 && inviteNul.status === 400 && inviteNul.data.error === 'Invalid characters');
+    check('invite accept with a nul is rejected', acceptNul.status === 400 && acceptNul.data.error === 'Invalid characters');
+
+    const fault = await jget(`/api/auth/__fault?marker=${probe}`);
+    const afterFault = await jget('/api/auth/me');
+    await new Promise(r => setTimeout(r, 50));
+    check('forced route rejection is a generic 500', fault.status === 500 && fault.data.error === 'Something went wrong' && !JSON.stringify(fault.data).includes(probe));
+    check('server stays up after a forced rejection', afterFault.status === 401);
+    check('logs omit the posted fields', !log.includes(probe) && log.includes('EFAULT') && !log.includes('forced'));
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));

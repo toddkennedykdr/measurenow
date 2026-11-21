@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -26,6 +26,26 @@ import {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+function safeErrorCode(err: unknown): string {
+  if (!err || typeof err !== 'object') return 'Error';
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(code)) return code;
+  const name = (err as { name?: unknown }).name;
+  if (typeof name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name)) return name;
+  return 'Error';
+}
+
+function safeRoute(req: Request): string {
+  const pattern = req.route && typeof req.route.path === 'string' ? req.route.path : '';
+  const route = `${req.baseUrl || ''}${pattern}`;
+  if (!route || route.length > 80 || !/^[A-Za-z0-9_./:-]+$/.test(route)) return 'unmatched';
+  return route;
+}
+
+process.on('unhandledRejection', (reason) => {
+  console.error(JSON.stringify({ type: 'unhandledRejection', code: safeErrorCode(reason) }));
+});
 
 // Railway terminates TLS at one edge proxy hop. Trust exactly that hop so req.ip is the
 // real client IP (used by the rate limiters). Never `true` (that would trust spoofed XFF).
@@ -130,6 +150,15 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(indexFile);
   });
 }
+
+app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  console.error(JSON.stringify({ type: 'request-error', method: req.method, route: safeRoute(req), code: safeErrorCode(err) }));
+  res.status(500).json({ error: 'Something went wrong' });
+});
 
 async function start() {
   if (process.env.SKIP_DB_INIT === '1') {

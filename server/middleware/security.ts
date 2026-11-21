@@ -12,6 +12,13 @@ export type SessionUser = {
   disabled: boolean;
 };
 
+/** Express 4 does not catch a rejected async route. Send it to the error handler. */
+export function asyncRoute(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown> | unknown): RequestHandler {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
 /** True when the request carries a logged-in staff session. */
 export function isStaff(req: Request): boolean {
   return Boolean((req.session as any)?.userId);
