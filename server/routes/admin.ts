@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { eq } from 'drizzle-orm';
 import { db, pool, schema } from '../db';
-import { adminRateLimit, requireAdmin, SessionUser } from '../middleware/security';
+import { PROD_ORIGIN, adminRateLimit, asyncRoute, requireAdmin, SessionUser } from '../middleware/security';
 import {
   INVITE_TTL_MS,
   emailProblem,
@@ -22,7 +22,7 @@ function current(req: Request): SessionUser {
   return (req as any).currentUser as SessionUser;
 }
 
-adminRouter.get('/users', async (_req: Request, res: Response) => {
+adminRouter.get('/users', asyncRoute(async (_req: Request, res: Response) => {
   const rows = await db.select({
     id: schema.users.id,
     name: schema.users.name,
@@ -33,9 +33,9 @@ adminRouter.get('/users', async (_req: Request, res: Response) => {
     disabled: schema.users.disabled,
   }).from(schema.users).orderBy(schema.users.name);
   return res.json({ users: rows.map(publicUser) });
-});
+}));
 
-adminRouter.patch('/users/:id', async (req: Request, res: Response) => {
+adminRouter.patch('/users/:id', asyncRoute(async (req: Request, res: Response) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(404).json({ error: 'User not found' });
   if (typeof req.body?.disabled !== 'boolean') return res.status(400).json({ error: 'disabled must be true or false' });
@@ -65,9 +65,9 @@ adminRouter.patch('/users/:id', async (req: Request, res: Response) => {
 
   await db.update(schema.users).set({ disabled }).where(eq(schema.users.id, id));
   return res.json({ user: publicUser({ ...target, disabled }) });
-});
+}));
 
-adminRouter.get('/invites', async (_req: Request, res: Response) => {
+adminRouter.get('/invites', asyncRoute(async (_req: Request, res: Response) => {
   const result = await pool.query(
     `SELECT id, name, username, email, created_at, expires_at
      FROM invites
@@ -84,9 +84,9 @@ adminRouter.get('/invites', async (_req: Request, res: Response) => {
       expiresAt: r.expires_at,
     })),
   });
-});
+}));
 
-adminRouter.post('/invites', async (req: Request, res: Response) => {
+adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
   const nameErr = nameProblem(req.body?.name);
   if (nameErr) return res.status(400).json({ error: nameErr });
   const userErr = usernameProblem(req.body?.username);
@@ -121,14 +121,14 @@ adminRouter.post('/invites', async (req: Request, res: Response) => {
     expiresAt,
   }).returning({ id: schema.invites.id });
 
-  const inviteUrl = `${req.protocol}://${req.get('host')}/invite/${token}`;
+  const inviteUrl = `${PROD_ORIGIN}/invite/${token}`;
   return res.json({
     invite: { id: inserted[0].id, name, username, email, expiresAt: expiresAt.toISOString() },
     inviteUrl,
   });
-});
+}));
 
-adminRouter.post('/invites/:id/revoke', async (req: Request, res: Response) => {
+adminRouter.post('/invites/:id/revoke', asyncRoute(async (req: Request, res: Response) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(404).json({ error: 'Invite not found' });
   const result = await pool.query(
@@ -144,9 +144,9 @@ adminRouter.post('/invites/:id/revoke', async (req: Request, res: Response) => {
     return res.status(409).json({ error: 'This invite is already revoked' });
   }
   return res.json({ ok: true });
-});
+}));
 
-adminRouter.get('/orders', async (req: Request, res: Response) => {
+adminRouter.get('/orders', asyncRoute(async (req: Request, res: Response) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
   const userIdRaw = typeof req.query.userId === 'string' ? req.query.userId : '';
   let userId: number | null = null;
@@ -192,4 +192,4 @@ adminRouter.get('/orders', async (req: Request, res: Response) => {
       analysis: r.analysis,
     })),
   });
-});
+}));

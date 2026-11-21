@@ -79,6 +79,7 @@ function childEnv(extra = {}) {
     NODE_ENV: 'development',
     SESSION_SECRET: 'password-test-only',
     SEED_ADMIN_PASSWORD: '',
+    ROUTE_FAULT: '1',
     TZ: 'UTC',
     ...extra,
   };
@@ -94,8 +95,10 @@ async function jpost(pathname, body, { ip, cookie } = {}) {
     .join('; ');
   return { status: res.status, data, cookie: setCookie || cookie || '' };
 }
-async function jget(pathname, { ip } = {}) {
-  const res = await fetch(BASE + pathname, { headers: { 'x-forwarded-for': ip || nextIp() } });
+async function jget(pathname, { ip, cookie } = {}) {
+  const headers = { 'x-forwarded-for': ip || nextIp() };
+  if (cookie) headers.cookie = cookie;
+  const res = await fetch(BASE + pathname, { headers });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
 }
@@ -450,6 +453,172 @@ async function main() {
     const keeperAfterSym = await jget(`/api/auth/reset-password/${encodeURIComponent(keeper)}`);
     check('symlink output is refused', sym.status === 1 && (sym.stderr || '').includes('Could not write the reset link file.'));
     check('symlink refusal leaves the database unchanged', outputHides(`${sym.stdout || ''}\n${sym.stderr || ''}`, [keeper]) && afterSym === beforeBlocked && keeperAfterSym.status === 200 && fs.lstatSync(symlink).isSymbolicLink() && fs.readFileSync(sentinel, 'utf8') === 'sentinel-keep\n');
+
+    const probe = 'probeNUL9f3a';
+    const nulUser = await jpost('/api/auth/login', { username: `Todd\u0000${probe}`, password: 'x' });
+    const nulPass = await jpost('/api/auth/login', { username: 'Todd', password: `x\u0000${probe}` });
+    const stillUp = await jget('/api/auth/me');
+    check('nul username is rejected', nulUser.status === 400 && nulUser.data.error === 'Invalid characters' && !JSON.stringify(nulUser.data).includes(probe));
+    check('nul password is rejected', nulPass.status === 400 && nulPass.data.error === 'Invalid characters');
+    check('server stays up after a nul login', stillUp.status === 401);
+
+    const toddNow = await jpost('/api/auth/login', { username: 'Todd', password: PW.reset });
+    const inviteNul = await jpost('/api/admin/invites', {
+      name: `Ada\u0000${probe}`,
+      username: 'newname',
+      email: `a\u0000@b.co`,
+    }, { cookie: toddNow.cookie });
+    const acceptNul = await jpost('/api/auth/accept-invite', { token: `${probe}\u0000`, password: `long-enough-pw\u0000${probe}` });
+    check('invite with a nul is rejected', toddNow.status === 200 && inviteNul.status === 400 && inviteNul.data.error === 'Invalid characters');
+    check('invite accept with a nul is rejected', acceptNul.status === 400 && acceptNul.data.error === 'Invalid characters');
+
+    const typeProbe = 'probeType9f3a';
+    const typeErrorsBefore = (log.match(/"type":"request-error"/g) || []).length;
+    const arrUser = await jpost('/api/auth/login', { username: [`Todd\u0000${typeProbe}`], password: 'x' });
+    const numPass = await jpost('/api/auth/login', { username: 'Todd', password: 12 });
+    const objUser = await jpost('/api/auth/login', { username: { name: typeProbe }, password: 'x' });
+    const nullUser = await jpost('/api/auth/login', { username: null, password: 'x' });
+    const afterTypeLogin = await jget('/api/auth/me');
+    const inviteTypes = await jpost('/api/admin/invites', {
+      name: ['Ada'],
+      username: 12,
+      email: { address: typeProbe },
+    }, { cookie: toddNow.cookie });
+    const acceptTypes = await jpost('/api/auth/accept-invite', { token: [typeProbe], password: { secret: typeProbe } });
+    const resetTypes = await jpost('/api/auth/reset-password', { token: null, password: ['long-enough-password'] });
+    const changeTypes = await jpost('/api/auth/change-password', {
+      currentPassword: { secret: typeProbe },
+      password: null,
+    }, { cookie: toddNow.cookie });
+    const afterTypes = await jget('/api/auth/me', { cookie: toddNow.cookie });
+    await new Promise(r => setTimeout(r, 50));
+    const typeErrorsAfter = (log.match(/"type":"request-error"/g) || []).length;
+    check('array username is rejected', arrUser.status === 400 && arrUser.data.error === 'Invalid characters' && !JSON.stringify(arrUser.data).includes(typeProbe));
+    check('number password is rejected', numPass.status === 400 && numPass.data.error === 'Invalid characters');
+    check('object username is rejected', objUser.status === 400 && objUser.data.error === 'Invalid characters');
+    check('null username is rejected', nullUser.status === 400 && nullUser.data.error === 'Invalid characters');
+    check('invite non-strings are rejected', inviteTypes.status === 400 && inviteTypes.data.error === 'Invalid characters');
+    check('invite accept non-strings are rejected', acceptTypes.status === 400 && acceptTypes.data.error === 'Invalid characters');
+    check('reset non-strings are rejected', resetTypes.status === 400 && resetTypes.data.error === 'Invalid characters');
+    check('change-password non-strings are rejected', changeTypes.status === 400 && changeTypes.data.error === 'Invalid characters');
+    check('server stays up after non-string auth fields', afterTypeLogin.status === 401 && afterTypes.status === 200);
+    check('non-string auth fields are not error-level', typeErrorsAfter === typeErrorsBefore && !log.includes(typeProbe));
+
+    const fault = await jget(`/api/auth/__fault?marker=${probe}`);
+    const afterFault = await jget('/api/auth/me');
+    await new Promise(r => setTimeout(r, 50));
+    check('forced route rejection is a generic 500', fault.status === 500 && fault.data.error === 'Something went wrong' && !JSON.stringify(fault.data).includes(probe));
+    check('server stays up after a forced rejection', afterFault.status === 401);
+    check('logs omit the posted fields', !log.includes(probe) && log.includes('EFAULT') && !log.includes('forced'));
+
+    const made = await jpost('/api/admin/invites', { name: 'Link User', username: 'linkuser' }, { cookie: toddNow.cookie });
+    const madeUrl = String(made.data.inviteUrl || '');
+    const madeToken = madeUrl.includes('/') ? madeUrl.slice(madeUrl.lastIndexOf('/') + 1) : '';
+    track(madeUrl);
+    track(madeToken);
+    check(
+      'invite url uses the configured origin',
+      made.status === 200
+        && madeUrl.startsWith('https://measurenow-production.up.railway.app/invite/')
+        && !madeUrl.includes('127.0.0.1')
+        && madeToken.length === 32
+        && !log.includes(madeToken)
+        && !log.includes('linkuser')
+        && !log.includes('Link User'),
+    );
+
+    const reportProbe = 'probeRpt9f3a';
+    const nulReport = await jpost('/api/reports', { address: `1 Main\u0000${reportProbe}`, lat: 'bad' }, { cookie: toddNow.cookie });
+    const hugeReport = await jget('/api/reports/99999999999', { cookie: toddNow.cookie });
+    const afterReport = await jget('/api/auth/me', { cookie: toddNow.cookie });
+    check('nul report data is rejected', nulReport.status === 400 && nulReport.data.error === 'Invalid characters' && !JSON.stringify(nulReport.data).includes(reportProbe));
+    const note = 'North slope\nSecond line\r\nTab\there café 😀';
+    const aiText = 'Analysis\nkept\r\nspacing\tand café 😀';
+    const multiline = await jpost('/api/reports', {
+      address: '12 Café Lane',
+      lat: 35.78,
+      lng: -78.64,
+      roofData: { notes: note },
+      analysis: { text: aiText },
+    }, { cookie: toddNow.cookie });
+    const savedId = multiline.data && multiline.data.id;
+    const roundTrip = savedId ? await jget(`/api/reports/${savedId}`, { cookie: toddNow.cookie }) : { status: 0, data: {} };
+    check(
+      'multiline report text is saved',
+      multiline.status === 200
+        && roundTrip.status === 200
+        && roundTrip.data.address === '12 Café Lane'
+        && roundTrip.data.roofData && roundTrip.data.roofData.notes === note
+        && roundTrip.data.analysis && roundTrip.data.analysis.text === aiText,
+    );
+    const nlLogin = await jpost('/api/auth/login', { username: 'Todd\n', password: 'x' });
+    check('auth fields still reject newlines', nlLogin.status === 400 && nlLogin.data.error === 'Invalid characters');
+    const c0Probe = 'probeC019f3a';
+    const c0Report = await jpost('/api/reports', {
+      address: '12 Café Lane',
+      lat: 35.78,
+      lng: -78.64,
+      analysis: { text: `kept\u0001${c0Probe}` },
+    }, { cookie: toddNow.cookie });
+    const afterC0 = await jget('/api/auth/me', { cookie: toddNow.cookie });
+    check(
+      'other C0 in report text is rejected',
+      c0Report.status === 400
+        && c0Report.data.error === 'Invalid characters'
+        && !JSON.stringify(c0Report.data).includes(c0Probe)
+        && afterC0.status === 200,
+    );
+    check('oversized report id is rejected', hugeReport.status === 400 || hugeReport.status === 404);
+    check('server stays up after report checks', afterReport.status === 200);
+
+    const poolFault = await jget('/api/auth/__pool-fault');
+    const afterPool = await jget('/api/auth/me');
+    check('pool error does not exit', poolFault.status === 200 && poolFault.data.ok === true && afterPool.status === 401);
+
+    const errorLinesBefore = () => (log.match(/"type":"request-error"/g) || []).length;
+    await new Promise(r => setTimeout(r, 50));
+    const beforeClient = errorLinesBefore();
+    const malformed = await fetch(BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body: '{"probeJson9f3a":',
+    });
+    const malformedBody = await malformed.json().catch(() => ({}));
+    const rawNul = await fetch(BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body: Buffer.concat([Buffer.from('{"username":"'), Buffer.from([0]), Buffer.from('probeNulByte9f3a"}')]),
+    });
+    const rawNulBody = await rawNul.json().catch(() => ({}));
+    const tooBig = await fetch(BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body: `{"username":"${'a'.repeat(11 * 1024 * 1024)}"}`,
+    });
+    const tooBigBody = await tooBig.json().catch(() => ({}));
+    const badUri = await fetch(BASE + '/api/auth/reset-password/%FF', { headers: { 'x-forwarded-for': nextIp() } });
+    const badUriBody = await badUri.json().catch(() => ({}));
+    const unknownFault = await jget('/api/auth/__fault');
+    await new Promise(r => setTimeout(r, 80));
+    check('malformed json is 400', malformed.status === 400 && malformedBody.error === 'Bad request' && !JSON.stringify(malformedBody).includes('probeJson9f3a'));
+    check('raw nul byte in json is 400', rawNul.status === 400 && !JSON.stringify(rawNulBody).includes('probeNulByte9f3a'));
+    check('oversized body is 413', tooBig.status === 413 && tooBigBody.error === 'Payload too large');
+    check('bad percent encoding is 400', badUri.status === 400 && badUriBody.error === 'Bad request');
+    check('unknown route error is still a generic 500', unknownFault.status === 500 && unknownFault.data.error === 'Something went wrong');
+    check('client errors stay out of error-level logs', errorLinesBefore() === beforeClient + 1);
+    check('client and pool logs omit request fields', !log.includes('probeJson9f3a') && !log.includes('probeNulByte9f3a') && !log.includes('probeRpt9f3a') && !log.includes('probeC019f3a') && !log.includes('poolprobe9f3a') && log.includes('pool-error') && log.includes('ECONNRESET'));
+    const burstIp = '198.51.100.231';
+    const burst = [];
+    for (let n = 0; n < 31; n += 1) {
+      const res = await fetch(BASE + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': burstIp },
+        body: '{"broken":',
+      });
+      const data = await res.json().catch(() => ({}));
+      burst.push(res.status === 429 ? 429 : data.error === 'Bad request' ? 400 : res.status);
+    }
+    check('a burst of malformed json is throttled', burst.slice(0, 30).every(status => status === 400) && burst[30] === 429);
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));

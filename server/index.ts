@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -26,6 +26,26 @@ import {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+function safeErrorCode(err: unknown): string {
+  if (!err || typeof err !== 'object') return 'Error';
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(code)) return code;
+  const name = (err as { name?: unknown }).name;
+  if (typeof name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name)) return name;
+  return 'Error';
+}
+
+function safeRoute(req: Request): string {
+  const pattern = req.route && typeof req.route.path === 'string' ? req.route.path : '';
+  const route = `${req.baseUrl || ''}${pattern}`;
+  if (!route || route.length > 80 || !/^[A-Za-z0-9_./:-]+$/.test(route)) return 'unmatched';
+  return route;
+}
+
+process.on('unhandledRejection', (reason) => {
+  console.error(JSON.stringify({ type: 'unhandledRejection', code: safeErrorCode(reason) }));
+});
 
 // Railway terminates TLS at one edge proxy hop. Trust exactly that hop so req.ip is the
 // real client IP (used by the rate limiters). Never `true` (that would trust spoofed XFF).
@@ -71,6 +91,17 @@ app.use((req, res, next) => {
 });
 // CORS: only our own origins (prod Railway domain, ALLOWED_ORIGINS, localhost in dev).
 app.use(cors(corsOptionsDelegate));
+
+// Rate limit: 30 requests per minute per IP (keyed on the real client IP via trust proxy).
+// This sits ahead of the JSON parser so a malformed body counts toward the same limit.
+app.use('/api', rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again in a minute.' },
+}));
+
 app.use(express.json({ limit: '10mb' }));
 
 // Session
@@ -88,15 +119,6 @@ app.use(session({
 
 // Browser requests from foreign origins are refused outright.
 app.use('/api', blockForeignOrigins);
-
-// Rate limit: 30 requests per minute per IP (now keyed on the real client IP via trust proxy)
-app.use('/api', rateLimit({
-  windowMs: 60_000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please try again in a minute.' },
-}));
 
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
@@ -130,6 +152,37 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(indexFile);
   });
 }
+
+function clientStatus(err: unknown): number | null {
+  if (err instanceof URIError) return 400;
+  if (!err || typeof err !== 'object') return null;
+  const raw = (err as { status?: unknown; statusCode?: unknown }).status
+    ?? (err as { statusCode?: unknown }).statusCode;
+  const status = typeof raw === 'number' ? raw : NaN;
+  if (status >= 400 && status < 500) return status;
+  return null;
+}
+
+function clientMessage(status: number): string {
+  if (status === 413) return 'Payload too large';
+  if (status === 415) return 'Unsupported media type';
+  return 'Bad request';
+}
+
+app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  const status = clientStatus(err);
+  if (status) {
+    console.debug(JSON.stringify({ type: 'client-error', method: req.method, status }));
+    res.status(status).json({ error: clientMessage(status) });
+    return;
+  }
+  console.error(JSON.stringify({ type: 'request-error', method: req.method, route: safeRoute(req), code: safeErrorCode(err) }));
+  res.status(500).json({ error: 'Something went wrong' });
+});
 
 async function start() {
   if (process.env.SKIP_DB_INIT === '1') {
