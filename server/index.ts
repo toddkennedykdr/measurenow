@@ -18,6 +18,7 @@ dotenv.config();
 
 import { initDb } from './db';
 import { corsOptionsDelegate, blockForeignOrigins } from './middleware/security';
+import { sessionStore } from './sessionStore';
 import {
   HARDCODED_EMBED_ORIGINS,
   embedOriginsScript,
@@ -75,6 +76,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // Session
 app.use(session({
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || 'kd-measurenow-secret-2024',
   resave: false,
   saveUninitialized: false,

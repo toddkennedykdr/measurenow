@@ -21,6 +21,7 @@ const {
   emailProblem, nameProblem, publicUser, summarizeOrder,
   decidePasswordReset, newResetToken, hashResetToken, resetTokenProblem, parseResetHours,
   mintResetUserAllowed, passwordResetError, RESET_LINK_ERROR, RESET_MAX_HOURS, RESET_TOKEN_BYTES,
+  sessionIsStaff, normalizeUserEmail,
 } = authz;
 
 check('logged out is 401', accessDecision(null, true) === 401);
@@ -66,6 +67,14 @@ const pub = publicUser({
 });
 check('public user drops password hashes', !('passwordHash' in pub) && !('password_hash' in pub) && !JSON.stringify(pub).includes('should-not-leak'));
 check('public user keeps role and login', pub.role === 'admin' && pub.lastLoginAt === null && pub.disabled === false);
+check('public user omits email until an admin view asks', !('email' in pub));
+const withEmail = publicUser({
+  id: 4, name: 'Ada', username: 'Ada', role: 'user', createdAt: '2026-01-01', email: '  Ada@Example.com ',
+  passwordHash: 'should-not-leak',
+}, { includeEmail: true });
+check('admin view normalizes email and still drops the hash', withEmail.email === 'ada@example.com' && !('passwordHash' in withEmail) && !JSON.stringify(withEmail).includes('should-not-leak'));
+check('empty email clears and a bad email is refused', normalizeUserEmail('  ').ok === true && normalizeUserEmail('  ').email === null && normalizeUserEmail('not-an-email').ok === false);
+check('staff session requires an enabled account', sessionIsStaff(null) === false && sessionIsStaff({ disabled: true }) === false && sessionIsStaff({ disabled: false }) === true);
 check('unknown role becomes user', publicUser({ id: 2, name: 'A', username: 'a', role: 'owner', createdAt: '2026-01-01' }).role === 'user');
 
 const order = summarizeOrder({
@@ -121,6 +130,9 @@ const securitySrc = fs.readFileSync(path.join(root, 'server/middleware/security.
 check('mint reuses the app origin', securitySrc.includes('https://measurenow-production.up.railway.app') && mintSrc.includes('https://measurenow-production.up.railway.app'));
 check('mint default file is private', mintSrc.includes('/workspace/private/mn-reset-link.txt'));
 check('mint source does not print the token or link', !mintSrc.includes('console.log(link)') && !mintSrc.includes('console.log(token)') && !mintSrc.includes('console.error(link)') && !mintSrc.includes('console.error(token)'));
+const resetSrc = fs.readFileSync(path.join(root, 'server/passwordReset.ts'), 'utf8');
+check('reset mailer does not log the link or token', !resetSrc.includes('console.log') && !resetSrc.includes('console.error(link)') && !resetSrc.includes('console.error(token)') && !resetSrc.includes('console.error(err'));
+check('forgot-password is not behind the staff-skipping limiter', authSrc.includes("authRouter.post('/forgot-password'") && !authSrc.includes("perIpLimit('forgot"));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

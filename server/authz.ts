@@ -7,6 +7,11 @@ export function accessDecision(user: { role: string; disabled: boolean } | null,
   return 200;
 }
 
+/** A live session counts as staff only while that account exists and is enabled. */
+export function sessionIsStaff(user: { disabled: boolean } | null): boolean {
+  return user != null && user.disabled === false;
+}
+
 export function shouldSeedAdmin(userCount: number, password: string | undefined): 'seed' | 'skip-not-empty' | 'skip-no-password' | 'skip-short-password' {
   if (userCount > 0) return 'skip-not-empty';
   if (!password) return 'skip-no-password';
@@ -138,6 +143,17 @@ export function emailProblem(email: unknown): string | null {
   return null;
 }
 
+/** Empty clears the address. Anything kept is trimmed and lowercased. */
+export function normalizeUserEmail(email: unknown): { ok: true; email: string | null } | { ok: false; error: string } {
+  if (email == null) return { ok: true, email: null };
+  if (typeof email !== 'string') return { ok: false, error: 'Enter a valid email or leave it blank' };
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed) return { ok: true, email: null };
+  const problem = emailProblem(trimmed);
+  if (problem) return { ok: false, error: problem };
+  return { ok: true, email: trimmed };
+}
+
 export function nameProblem(name: unknown): string | null {
   if (typeof name !== 'string' || name.trim().length < 1 || name.trim().length > 80) return 'Name is required';
   return null;
@@ -152,10 +168,11 @@ export function publicUser(row: {
   createdAt: Date | string;
   lastLoginAt?: Date | string | null;
   disabled?: boolean | null;
+  email?: string | null;
   passwordHash?: string;
   password_hash?: string;
-}) {
-  return {
+}, options?: { includeEmail?: boolean }) {
+  const user = {
     id: row.id,
     name: row.name,
     username: row.username,
@@ -164,6 +181,9 @@ export function publicUser(row: {
     lastLoginAt: row.lastLoginAt == null ? null : (row.lastLoginAt instanceof Date ? row.lastLoginAt.toISOString() : row.lastLoginAt),
     disabled: Boolean(row.disabled),
   };
+  if (!options?.includeEmail) return user;
+  const email = normalizeUserEmail(row.email ?? null);
+  return { ...user, email: email.ok ? email.email : null };
 }
 
 function asObj(v: unknown): Record<string, any> {

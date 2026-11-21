@@ -9,11 +9,23 @@ import {
   hashInviteToken,
   hashResetToken,
   inviteTokenProblem,
+  normalizeUserEmail,
   passwordProblem,
   passwordResetError,
   RESET_LINK_ERROR,
   resetTokenProblem,
 } from '../authz';
+import {
+  forgotAccountKey,
+  forgotLimited,
+  forgotWaitMs,
+  issuePasswordReset,
+  passwordResetUrl,
+  RESET_EMAIL_HOURS,
+  resetEmailConfigured,
+  sendPasswordResetEmail,
+  waitForForgot,
+} from '../passwordReset';
 
 export const authRouter = Router();
 
@@ -65,7 +77,7 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
   try {
     await client.query('BEGIN');
     const found = await client.query(
-      `SELECT id, name, username, used_at, revoked_at, expires_at FROM invites WHERE token_hash = $1 FOR UPDATE`,
+      `SELECT id, name, username, email, used_at, revoked_at, expires_at FROM invites WHERE token_hash = $1 FOR UPDATE`,
       [hashInviteToken(token)],
     );
     const row = found.rows[0];
@@ -98,9 +110,11 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+    const normalizedEmail = normalizeUserEmail(row.email);
+    const email = normalizedEmail.ok ? normalizedEmail.email : null;
     await client.query(
-      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1, $2, $3, 'user', false)`,
-      [row.username, passwordHash, row.name],
+      `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1, $2, $3, 'user', false, $4)`,
+      [row.username, passwordHash, row.name, email],
     );
     const marked = await client.query(
       `UPDATE invites SET used_at = NOW() WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL RETURNING id`,
@@ -215,6 +229,72 @@ authRouter.post('/reset-password', resetLimit, async (req: Request, res: Respons
   } finally {
     client.release();
   }
+});
+
+const FORGOT_OK = { ok: true };
+const FORGOT_LIMIT = { error: 'Too many reset requests. Please wait and try again.' };
+
+async function maybeSendForgot(lookup: ReturnType<typeof forgotAccountKey>['lookup']) {
+  if (!lookup || !resetEmailConfigured()) return;
+  const found = lookup.kind === 'email'
+    ? await pool.query(
+      `SELECT id, disabled, email FROM users WHERE lower(email) = $1`,
+      [lookup.email],
+    )
+    : await pool.query(
+      `SELECT id, disabled, email FROM users WHERE username = $1`,
+      [lookup.username],
+    );
+  if (found.rows.length !== 1) return;
+  const user = found.rows[0];
+  const address = typeof user.email === 'string' ? user.email.trim() : '';
+  if (user.disabled || !address) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const issued = await issuePasswordReset(client, Number(user.id), RESET_EMAIL_HOURS);
+    if (!issued.ok) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    const fresh = await client.query(`SELECT email, disabled FROM users WHERE id = $1`, [user.id]);
+    const currentEmail = typeof fresh.rows[0]?.email === 'string' ? fresh.rows[0].email.trim() : '';
+    if (!currentEmail || fresh.rows[0]?.disabled) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(currentEmail, passwordResetUrl(issued.token), RESET_EMAIL_HOURS);
+    } catch {
+      await client.query('ROLLBACK');
+      console.error('reset email failed');
+      return;
+    }
+    await client.query('COMMIT');
+  } catch {
+    try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+    console.error('forgot-password failed');
+  } finally {
+    client.release();
+  }
+}
+
+// Always the same 200. A logged-in cookie does not skip the limiter.
+authRouter.post('/forgot-password', async (req: Request, res: Response) => {
+  const started = Date.now();
+  const waitMs = forgotWaitMs();
+  const parsed = forgotAccountKey(req.body?.identifier);
+  if (forgotLimited(String(req.ip || ''), parsed.key)) {
+    return res.status(429).json(FORGOT_LIMIT);
+  }
+  try {
+    await maybeSendForgot(parsed.lookup);
+  } catch {
+    console.error('forgot-password failed');
+  }
+  await waitForForgot(started, waitMs);
+  return res.json(FORGOT_OK);
 });
 
 authRouter.post('/change-password', requireAuth, async (req: Request, res: Response) => {

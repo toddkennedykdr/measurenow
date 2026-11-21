@@ -15,6 +15,9 @@ const { Client } = require('pg');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = 'measurenow_pwtest';
 const PORT = 3188;
+const PORT2 = 3189;
+const outboundPath = path.join(os.tmpdir(), `mn-outbound-${process.pid}.log`);
+const fetchStub = path.join(root, 'scripts/reset-fetch-stub.cjs');
 const BASE = `http://127.0.0.1:${PORT}`;
 const DATABASE_URL = `postgresql://${process.env.USER || 'ubuntu'}@/${DB}?host=/var/run/postgresql`;
 const GENERIC = 'This reset link is invalid or has expired';
@@ -79,6 +82,8 @@ function childEnv(extra = {}) {
     NODE_ENV: 'development',
     SESSION_SECRET: 'password-test-only',
     SEED_ADMIN_PASSWORD: '',
+    RESEND_API_KEY: 'stub-not-real',
+    OUTBOUND_LOG: outboundPath,
     TZ: 'UTC',
     ...extra,
   };
@@ -94,10 +99,24 @@ async function jpost(pathname, body, { ip, cookie } = {}) {
     .join('; ');
   return { status: res.status, data, cookie: setCookie || cookie || '' };
 }
-async function jget(pathname, { ip } = {}) {
-  const res = await fetch(BASE + pathname, { headers: { 'x-forwarded-for': ip || nextIp() } });
+async function jget(pathname, { ip, cookie } = {}) {
+  const headers = { 'x-forwarded-for': ip || nextIp() };
+  if (cookie) headers.cookie = cookie;
+  const res = await fetch(BASE + pathname, { headers });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
+}
+async function jpatch(pathname, body, { ip, cookie } = {}) {
+  const headers = { 'content-type': 'application/json', 'x-forwarded-for': ip || nextIp() };
+  if (cookie) headers.cookie = cookie;
+  const res = await fetch(BASE + pathname, { method: 'PATCH', headers, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+async function jpostTimed(pathname, body, opts) {
+  const started = Date.now();
+  const result = await jpost(pathname, body, opts);
+  return { ...result, ms: Date.now() - started };
 }
 
 async function hashes(client) {
@@ -155,11 +174,13 @@ async function main() {
   } catch { /* already exists */ }
   execFileSync('psql', ['-q', '-d', DB, '-v', 'ON_ERROR_STOP=1', '-c', 'SET client_min_messages TO warning; DROP SCHEMA public CASCADE; CREATE SCHEMA public;']);
 
+  fs.writeFileSync(outboundPath, '');
   const entry = process.env.PASSWORD_TEST_SRC === '1'
-    ? ['--import', 'tsx', path.join(root, 'server/index.ts')]
-    : [path.join(root, 'dist-server/index.js')];
+    ? ['--require', fetchStub, '--import', 'tsx', path.join(root, 'server/index.ts')]
+    : ['--require', fetchStub, path.join(root, 'dist-server/index.js')];
   let log = '';
   const srv = spawn(process.execPath, entry, { cwd: root, env: childEnv() });
+  let srv2 = null;
   srv.stdout.on('data', d => { log += d; });
   srv.stderr.on('data', d => { log += d; });
 
@@ -450,12 +471,280 @@ async function main() {
     const keeperAfterSym = await jget(`/api/auth/reset-password/${encodeURIComponent(keeper)}`);
     check('symlink output is refused', sym.status === 1 && (sym.stderr || '').includes('Could not write the reset link file.'));
     check('symlink refusal leaves the database unchanged', outputHides(`${sym.stdout || ''}\n${sym.stderr || ''}`, [keeper]) && afterSym === beforeBlocked && keeperAfterSym.status === 200 && fs.lstatSync(symlink).isSymbolicLink() && fs.readFileSync(sentinel, 'utf8') === 'sentinel-keep\n');
+
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`);
+    const emailCols = await client.query(
+      `SELECT COUNT(*)::int AS n, bool_or(is_nullable = 'YES') AS nullable
+       FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'email'`,
+    );
+    check('email migration is idempotent and nullable', emailCols.rows[0].n === 1 && emailCols.rows[0].nullable === true);
+
+    const toddNow = await jpost('/api/auth/login', { username: 'Todd', password: PW.reset });
+    const adaNow = await jpost('/api/auth/login', { username: 'Ada', password: PW.adaNext });
+    const toddCookie = toddNow.cookie;
+    check('admin session for user tools', toddNow.status === 200 && toddCookie.includes('connect.sid'));
+    const anonReset = await jpost('/api/admin/users/1/reset-link', {});
+    check('reset-link without a session is 401', anonReset.status === 401);
+    const userReset = await jpost('/api/admin/users/1/reset-link', {}, { cookie: adaNow.cookie });
+    check('reset-link for a non-admin is 403', userReset.status === 403 && userReset.data.error === 'Admin only');
+
+    const copyUser = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['copyuser', bcrypt.hashSync(PW.invite, 10), 'Copy User'],
+    );
+    const copyId = Number(copyUser.rows[0].id);
+    const beforeCopy = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [copyId])).rows[0].n);
+    const copied = await jpost(`/api/admin/users/${copyId}/reset-link`, {}, { cookie: toddCookie });
+    const copyLink = copied.data.link || '';
+    const copyToken = copyLink.includes('/') ? copyLink.slice(copyLink.lastIndexOf('/') + 1) : '';
+    track(copyLink);
+    track(copyToken);
+    const copyLeft = await client.query(
+      `SELECT EXTRACT(EPOCH FROM (expires_at - (NOW() AT TIME ZONE 'UTC'))) AS seconds
+       FROM password_resets WHERE user_id = $1 AND used_at IS NULL`,
+      [copyId],
+    );
+    const copySeconds = Number(copyLeft.rows[0]?.seconds);
+    check(
+      'no email returns the link once with the reason and a 24h expiry',
+      copied.status === 200 && copied.data.sent === false && copied.data.reason === 'No email on file'
+        && copyLink.startsWith('https://measurenow-production.up.railway.app/reset/')
+        && copyToken.length === 43
+        && !JSON.stringify(copied.data).includes(copyUser.rows[0].password_hash || 'password_hash')
+        && Number.isFinite(copySeconds) && Math.abs(copySeconds - 24 * 60 * 60) <= 90,
+    );
+    check('copy link is absent from the server log', copyToken.length === 43 && !log.includes(copyToken) && !log.includes(copyLink));
+
+    const replaced = await jpost(`/api/admin/users/${copyId}/reset-link`, {}, { cookie: toddCookie });
+    const replacedToken = (replaced.data.link || '').slice((replaced.data.link || '').lastIndexOf('/') + 1);
+    track(replaced.data.link || '');
+    track(replacedToken);
+    const oldAfterReplace = await jget(`/api/auth/reset-password/${encodeURIComponent(copyToken)}`);
+    check('a new reset link invalidates the older unused token', replaced.status === 200 && replacedToken.length === 43 && oldAfterReplace.status === 400 && oldAfterReplace.data.error === GENERIC);
+    check('replacement link stays out of the log', !log.includes(replacedToken));
+
+    await client.query(`UPDATE users SET email = $1 WHERE id = $2`, ['copy.user@example.com', copyId]);
+    fs.writeFileSync(outboundPath, '');
+    const logBeforeEmail = log.length;
+    const emailed = await jpost(`/api/admin/users/${copyId}/reset-link`, {}, { cookie: toddCookie });
+    const mailed = fs.readFileSync(outboundPath, 'utf8');
+    const mailedToken = (mailed.match(/\/reset\/([A-Za-z0-9_-]{43})/) || [])[1] || '';
+    track(mailedToken);
+    const mailedLink = mailedToken ? `https://measurenow-production.up.railway.app/reset/${mailedToken}` : '';
+    track(mailedLink);
+    const mailedLeft = await client.query(
+      `SELECT EXTRACT(EPOCH FROM (expires_at - (NOW() AT TIME ZONE 'UTC'))) AS seconds
+       FROM password_resets WHERE token_hash = $1`,
+      [sha(mailedToken || 'missing')],
+    );
+    const mailedSeconds = Number(mailedLeft.rows[0]?.seconds);
+    let mailedBody = {};
+    try { mailedBody = JSON.parse(mailed.trim().split('\n').filter(Boolean).pop() || '{}'); } catch { mailedBody = {}; }
+    check(
+      'email path returns sent without the link and expires in 1 hour',
+      emailed.status === 200 && JSON.stringify(emailed.data) === '{"sent":true}'
+        && mailedToken.length === 43
+        && !JSON.stringify(emailed.data).includes(mailedToken)
+        && Number.isFinite(mailedSeconds) && Math.abs(mailedSeconds - 60 * 60) <= 90,
+    );
+    check(
+      'reset email is plain K&D Roofing copy',
+      mailedBody.from === 'K&D Roofing <noreply@kanddroofingnc.com>'
+        && mailedBody.subject === 'Reset your K&D Roofing password'
+        && String(mailedBody.text || '').includes('K&D Roofing')
+        && String(mailedBody.text || '').includes('1 hour')
+        && String(mailedBody.text || '').includes('(919) 977-4074')
+        && !/no pressure/i.test(mailed)
+        && !/solar/i.test(mailed),
+    );
+    check('emailed token never appears in the server log', mailedToken && !log.slice(logBeforeEmail).includes(mailedToken) && !log.includes(mailedLink));
+    const oldCopyAfterEmail = await jget(`/api/auth/reset-password/${encodeURIComponent(replacedToken)}`);
+    check('emailing a new link invalidates the copied one', oldCopyAfterEmail.status === 400);
+    const mailedUse = await jpost('/api/auth/reset-password', { token: mailedToken, password: PW.third });
+    const mailedReuse = await jpost('/api/auth/reset-password', { token: mailedToken, password: PW.adaNext });
+    check('emailed link is single use', mailedUse.status === 200 && mailedReuse.status === 400 && mailedReuse.data.error === GENERIC);
+
+    const patBefore = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [patId])).rows[0].n);
+    await client.query(`UPDATE users SET email = 'pat@example.com' WHERE id = $1`, [patId]);
+    const patReset = await jpost(`/api/admin/users/${patId}/reset-link`, {}, { cookie: toddCookie });
+    const patAfter = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [patId])).rows[0].n);
+    check('admin reset refuses a disabled user', patReset.status === 400 && patReset.data.error === 'That account is disabled.' && patAfter === patBefore);
+    const patMint = runMint(['Pat', '--allow-other-user', '--expires-hours', '1', '--out', path.join(dir, 'pat-link.txt'), '--base-url', APP_BASE]);
+    const patAfterCli = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [patId])).rows[0].n);
+    check('CLI mint refuses a disabled user', patMint.status === 1 && (patMint.stderr || '').includes('That account is disabled.') && patAfterCli === patBefore && !fs.existsSync(path.join(dir, 'pat-link.txt')));
+
+    const noMail = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['nomail', bcrypt.hashSync(PW.invite, 10), 'No Mail'],
+    );
+    const noMailId = Number(noMail.rows[0].id);
+    await client.query(`UPDATE users SET email = 'ada@example.com' WHERE username = 'Ada'`);
+    const bodies = [];
+    const forgotCases = [
+      ['existing', 'Ada'],
+      ['missing', 'nobody-user'],
+      ['disabled', 'Pat'],
+      ['no-email', 'nomail'],
+      ['wrong-case-username', 'ada'],
+      ['email-case', 'ADA@Example.com'],
+    ];
+    const beforeForgot = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets`)).rows[0].n);
+    fs.writeFileSync(outboundPath, '');
+    for (const [label, identifier] of forgotCases) {
+      const timed = await jpostTimed('/api/auth/forgot-password', { identifier });
+      bodies.push(JSON.stringify(timed.data));
+      check(`forgot ${label} stays at least 800ms`, timed.status === 200 && timed.ms >= 790, `ms=${timed.ms}`);
+    }
+    const afterForgot = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets`)).rows[0].n);
+    const forgotMail = fs.readFileSync(outboundPath, 'utf8');
+    const forgotTokens = [...new Set([...forgotMail.matchAll(/\/reset\/([A-Za-z0-9_-]{43})/g)].map(match => match[1]))];
+    for (const token of forgotTokens) track(token);
+    check('forgot responses are identical', new Set(bodies).size === 1 && bodies[0] === '{"ok":true}');
+    check('forgot sends only for the enabled account with an email', afterForgot === beforeForgot + 2 && forgotTokens.length === 2);
+    check('forgot tokens stay out of the server log', forgotTokens.every(token => token && !log.includes(token)));
+
+    const limitIp = '198.51.100.40';
+    let limitedAt = 0;
+    for (let n = 1; n <= 6; n += 1) {
+      const timed = await jpostTimed('/api/auth/forgot-password', { identifier: `missing-${n}` }, { ip: limitIp, cookie: toddCookie });
+      if (timed.status === 429) limitedAt = n;
+      if (n < 6) check(`forgot ip attempt ${n} is allowed`, timed.status === 200 && timed.ms >= 790);
+    }
+    check('forgot ip limit ignores a logged-in cookie', limitedAt === 6);
+    let accountLimited = 0;
+    for (let n = 1; n <= 6; n += 1) {
+      const timed = await jpostTimed('/api/auth/forgot-password', { identifier: 'same-missing-user' }, { ip: `198.51.100.${50 + n}` });
+      if (timed.status === 429) accountLimited = n;
+      if (n < 6) check(`forgot account attempt ${n} is allowed`, timed.status === 200);
+    }
+    check('forgot account limit trips on the sixth try', accountLimited === 6);
+
+    const edited = await jpatch(`/api/admin/users/${copyId}`, { email: '  Other@Example.com ' }, { cookie: toddCookie });
+    check('admin email edit normalizes', edited.status === 200 && edited.data.user.email === 'other@example.com' && !JSON.stringify(edited.data).includes('password'));
+    const cleared = await jpatch(`/api/admin/users/${copyId}`, { email: '   ' }, { cookie: toddCookie });
+    check('blank email clears the column', cleared.status === 200 && cleared.data.user.email === null);
+    const badEmail = await jpatch(`/api/admin/users/${copyId}`, { email: 'not-an-email' }, { cookie: toddCookie });
+    check('bad email is refused', badEmail.status === 400);
+    const me = await jget('/api/auth/me', { cookie: toddCookie });
+    check('login session does not include email', me.status === 200 && !('email' in me.data) && !JSON.stringify(me.data).includes('password'));
+    const listed = await jget('/api/admin/users', { cookie: toddCookie });
+    const listedAda = (listed.data.users || []).find(row => row.username === 'Ada');
+    check('admin list shows email and hides the hash', listed.status === 200 && listedAda && listedAda.email === 'ada@example.com' && !JSON.stringify(listed.data).includes('password_hash'));
+
+    const inviteEmailToken = track(randomBytes(16).toString('hex'));
+    await client.query(
+      `INSERT INTO invites (name, username, email, token_hash, expires_at)
+       VALUES ($1, $2, $3, $4, (NOW() AT TIME ZONE 'UTC') + interval '1 hour')`,
+      ['Emailed Person', 'emailed', 'Invite.User@Example.com', sha(inviteEmailToken)],
+    );
+    const acceptedEmail = await jpost('/api/auth/accept-invite', { token: inviteEmailToken, password: PW.invite });
+    const storedInviteEmail = await client.query(`SELECT email FROM users WHERE username = 'emailed'`);
+    check('invite accept stores the normalized email', acceptedEmail.status === 200 && storedInviteEmail.rows[0]?.email === 'invite.user@example.com');
+
+    const staffIp = '198.51.100.20';
+    const disabledIp = '198.51.100.21';
+    const staffCodes = [];
+    for (let n = 0; n < 21; n += 1) staffCodes.push(await jpost('/api/roof/geocode', { address: '1 Test St, Raleigh, NC' }, { ip: staffIp, cookie: toddCookie }));
+    check('enabled admin cookie still counts as staff', staffCodes.every(result => result.status !== 429));
+    const sam = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['samstaff', bcrypt.hashSync(PW.ada, 10), 'Sam Staff'],
+    );
+    const samId = Number(sam.rows[0].id);
+    const samLogin = await jpost('/api/auth/login', { username: 'samstaff', password: PW.ada });
+    await client.query(`UPDATE users SET disabled = true WHERE id = $1`, [samId]);
+    const samCodes = [];
+    for (let n = 0; n < 21; n += 1) samCodes.push(await jpost('/api/roof/geocode', { address: '1 Test St, Raleigh, NC' }, { ip: disabledIp, cookie: samLogin.cookie }));
+    check('disabled cookie is not staff', samCodes.slice(0, 20).every(result => result.status !== 429) && samCodes[20].status === 429);
+
+    const riley = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['riley', bcrypt.hashSync(PW.ada, 10), 'Riley Stone'],
+    );
+    const rileyId = Number(riley.rows[0].id);
+    const rileyA = await jpost('/api/auth/login', { username: 'riley', password: PW.ada });
+    const rileyB = await jpost('/api/auth/login', { username: 'riley', password: PW.ada });
+    const rileyBefore = await jget('/api/auth/me', { cookie: rileyA.cookie });
+    check('riley session works before disable', rileyBefore.status === 200 && rileyBefore.data.username === 'riley');
+    const disabledRiley = await jpatch(`/api/admin/users/${rileyId}`, { disabled: true }, { cookie: toddCookie });
+    const rileyMe = await jget('/api/auth/me', { cookie: rileyA.cookie });
+    const rileyReports = await jget('/api/reports', { cookie: rileyA.cookie });
+    const rileyOther = await jget('/api/reports', { cookie: rileyB.cookie });
+    const toddStill = await jget('/api/auth/me', { cookie: toddCookie });
+    check('disabling revokes every session for that user', disabledRiley.status === 200 && disabledRiley.data.user.disabled === true && rileyMe.status === 401 && rileyReports.status === 401 && rileyOther.status === 401);
+    check('the admin session stays signed in', toddStill.status === 200 && toddStill.data.username === 'Todd');
+    const enabledRiley = await jpatch(`/api/admin/users/${rileyId}`, { disabled: false }, { cookie: toddCookie });
+    check('enable is saved', enabledRiley.status === 200 && enabledRiley.data.user.disabled === false);
+
+    const audits = log.split('\n').map(line => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(row => row && row.type === 'audit');
+    const actions = audits.map(row => row.action).sort();
+    const auditKeysOk = audits.every(row => Object.keys(row).sort().join(',') === 'action,actorId,at,targetId,type');
+    const auditText = JSON.stringify(audits);
+    check(
+      'audit log records ids only',
+      actions.includes('disable') && actions.includes('enable') && actions.includes('email-change') && actions.includes('reset-link')
+        && auditKeysOk
+        && !auditText.includes('@')
+        && !auditText.includes('/reset/')
+        && !auditText.includes('Riley')
+        && !auditText.includes('copy.user'),
+    );
+
+    const noKeyLog = path.join(os.tmpdir(), `mn-nokey-${process.pid}.log`);
+    fs.writeFileSync(noKeyLog, '');
+    srv2 = spawn(process.execPath, entry, {
+      cwd: root,
+      env: childEnv({ PORT: String(PORT2), RESEND_API_KEY: '', OUTBOUND_LOG: noKeyLog }),
+    });
+    srv2.stdout.on('data', d => { log += d; });
+    srv2.stderr.on('data', d => { log += d; });
+    const base2 = `http://127.0.0.1:${PORT2}`;
+    for (let i = 0; i < 50; i += 1) {
+      try {
+        const res = await fetch(base2 + '/api/auth/me');
+        if (res.status === 401 || res.status === 200) break;
+      } catch { /* still booting */ }
+      if (i === 49) throw new Error('second server did not start');
+      await new Promise(r => setTimeout(r, 200));
+    }
+    const todd2 = await fetch(base2 + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.70' },
+      body: JSON.stringify({ username: 'Todd', password: PW.reset }),
+    });
+    const todd2Cookie = (typeof todd2.headers.getSetCookie === 'function' ? todd2.headers.getSetCookie() : []).map(part => part.split(';')[0]).join('; ');
+    await client.query(`UPDATE users SET email = 'copy.user@example.com' WHERE id = $1`, [copyId]);
+    const unconfigured = await fetch(base2 + `/api/admin/users/${copyId}/reset-link`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: todd2Cookie, 'x-forwarded-for': '198.51.100.71' },
+      body: '{}',
+    });
+    const unconfiguredBody = await unconfigured.json();
+    const unconfiguredToken = String(unconfiguredBody.link || '').split('/').pop();
+    track(unconfiguredBody.link || '');
+    track(unconfiguredToken);
+    const unconfiguredLeft = await client.query(
+      `SELECT EXTRACT(EPOCH FROM (expires_at - (NOW() AT TIME ZONE 'UTC'))) AS seconds
+       FROM password_resets WHERE token_hash = $1`,
+      [sha(unconfiguredToken || 'missing')],
+    );
+    check(
+      'missing email config returns the link and says email is not configured',
+      unconfigured.status === 200 && unconfiguredBody.sent === false && unconfiguredBody.reason === 'Email not configured'
+        && String(unconfiguredBody.link || '').startsWith('https://measurenow-production.up.railway.app/reset/')
+        && Math.abs(Number(unconfiguredLeft.rows[0]?.seconds) - 24 * 60 * 60) <= 90
+        && !log.includes(unconfiguredToken),
+    );
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));
   } finally {
     try { await client.end(); } catch { /* not connected */ }
     if (srv && srv.pid) srv.kill();
+    if (srv2 && srv2.pid) srv2.kill();
     console.log(`\n${pass} passed, ${fail} failed`);
     if (fail && log) console.log('--- server log ---\n' + redact(log));
     process.exit(fail ? 1 : 0);
