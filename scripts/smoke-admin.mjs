@@ -150,10 +150,33 @@ resetMod.forgotLimitedAt('192.0.2.8', 'user:stale', staleAt);
 const beforePrune = resetMod.forgotBucketCount();
 resetMod.forgotLimitedAt('192.0.2.9', 'user:live', Date.now());
 check('expired forgot keys are removed', beforePrune === 2 && resetMod.forgotBucketCount() === 2);
-for (let i = 0; i < resetMod.FORGOT_CAP + 25; i += 1) {
-  resetMod.forgotLimitedAt('203.0.113.9', `user:cap${i}`, Date.now());
+const capNow = Date.now();
+const targetKey = 'id:4242';
+for (let n = 0; n < resetMod.FORGOT_MAX; n += 1) {
+  resetMod.forgotDecision(`192.0.2.${10 + n}`, targetKey, capNow);
 }
+let targetSends = 0;
+const targetAttempt = (ip) => {
+  const decision = resetMod.forgotDecision(ip, targetKey, capNow);
+  if (decision === 'allow') targetSends += 1;
+  return decision;
+};
+const sixth = targetAttempt('192.0.2.40');
+for (let i = 0; i < resetMod.FORGOT_CAP + 25; i += 1) {
+  const ip = `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+  resetMod.forgotDecision(ip, `user:flood${i}`, capNow);
+}
+const afterFlood = targetAttempt('192.0.2.41');
 check('forgot map stays within the cap', resetMod.forgotBucketCount() <= resetMod.FORGOT_CAP);
+check('a live account stays limited when the cap fills', sixth === 'limited' && afterFlood === 'limited' && targetSends === 0);
+let closed = null;
+for (let i = 0; i < resetMod.FORGOT_CAP + 5 && closed == null; i += 1) {
+  const ip = `11.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+  const decision = resetMod.forgotDecision(ip, `id:${10000 + i}`, capNow);
+  if (decision === 'closed') closed = decision;
+}
+const afterClosed = targetAttempt('192.0.2.42');
+check('a full account map fails closed without resetting a live bucket', closed === 'closed' && afterClosed === 'limited' && targetSends === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

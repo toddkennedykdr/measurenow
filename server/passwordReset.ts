@@ -123,20 +123,43 @@ export async function sendPasswordResetEmail(to: string, link: string, hours: nu
 export const FORGOT_CAP = 1000;
 const forgotHits = new Map<string, number[]>();
 
-function pruneForgot(now: number) {
+function isLiveAccountBucket(key: string): boolean {
+  return key.startsWith('acct:id:');
+}
+
+function pruneExpired(now: number) {
   for (const [key, stamps] of forgotHits) {
     const kept = stamps.filter((at) => now - at < FORGOT_WINDOW_MS);
     if (kept.length === 0) forgotHits.delete(key);
     else forgotHits.set(key, kept);
   }
-  while (forgotHits.size > FORGOT_CAP) {
-    const oldest = forgotHits.keys().next().value;
-    if (oldest === undefined) break;
-    forgotHits.delete(oldest);
+}
+
+/** Drop expired rows, then IP and unknown-identifier buckets. Live id: buckets stay. */
+function evictDisposable(preserve: string[] = []) {
+  if (forgotHits.size <= FORGOT_CAP) return;
+  for (const key of [...forgotHits.keys()]) {
+    if (forgotHits.size <= FORGOT_CAP) break;
+    if (isLiveAccountBucket(key) || preserve.includes(key)) continue;
+    forgotHits.delete(key);
   }
 }
 
-const forgotPruneTimer = setInterval(() => pruneForgot(Date.now()), 60_000);
+function roomFor(extra: number, preserve: string[]): boolean {
+  if (extra <= 0 || forgotHits.size + extra <= FORGOT_CAP) return true;
+  for (const key of [...forgotHits.keys()]) {
+    if (forgotHits.size + extra <= FORGOT_CAP) break;
+    if (isLiveAccountBucket(key) || preserve.includes(key)) continue;
+    forgotHits.delete(key);
+  }
+  return forgotHits.size + extra <= FORGOT_CAP;
+}
+
+const forgotPruneTimer = setInterval(() => {
+  const now = Date.now();
+  pruneExpired(now);
+  evictDisposable();
+}, 60_000);
 if (typeof forgotPruneTimer.unref === 'function') forgotPruneTimer.unref();
 
 function hitsWithin(key: string, now: number): number[] {
@@ -146,25 +169,41 @@ function hitsWithin(key: string, now: number): number[] {
   return kept;
 }
 
+export type ForgotDecision = 'allow' | 'limited' | 'closed';
+
+/**
+ * 'limited' is the 5-hit window. 'closed' means a new bucket would not fit
+ * without dropping a live per-account bucket, so the caller sends nothing.
+ */
+export function forgotDecision(ip: string, accountKey: string | null, now: number): ForgotDecision {
+  pruneExpired(now);
+  evictDisposable();
+  const ipKey = `ip:${ip}`;
+  const acctKey = accountKey ? `acct:${accountKey}` : null;
+  const preserve = acctKey ? [ipKey, acctKey] : [ipKey];
+  const ipHits = hitsWithin(ipKey, now);
+  const accountHits = acctKey ? hitsWithin(acctKey, now) : null;
+  if (ipHits.length >= FORGOT_MAX) return 'limited';
+  if (accountHits && accountHits.length >= FORGOT_MAX) return 'limited';
+  const extra = preserve.filter(key => !forgotHits.has(key)).length;
+  if (!roomFor(extra, preserve)) return 'closed';
+  ipHits.push(now);
+  forgotHits.set(ipKey, ipHits);
+  if (accountHits && acctKey) {
+    accountHits.push(now);
+    forgotHits.set(acctKey, accountHits);
+  }
+  evictDisposable(preserve);
+  return 'allow';
+}
+
 /** True when this IP or this account key is over the window. A session cookie is not consulted. */
 export function forgotLimitedAt(ip: string, accountKey: string | null, now: number): boolean {
-  pruneForgot(now);
-  const ipHits = hitsWithin(`ip:${ip}`, now);
-  const accountHits = accountKey ? hitsWithin(`acct:${accountKey}`, now) : null;
-  if (ipHits.length >= FORGOT_MAX) return true;
-  if (accountHits && accountHits.length >= FORGOT_MAX) return true;
-  ipHits.push(now);
-  forgotHits.set(`ip:${ip}`, ipHits);
-  if (accountHits && accountKey) {
-    accountHits.push(now);
-    forgotHits.set(`acct:${accountKey}`, accountHits);
-  }
-  pruneForgot(now);
-  return false;
+  return forgotDecision(ip, accountKey, now) !== 'allow';
 }
 
 export function forgotLimited(ip: string, accountKey: string | null): boolean {
-  return forgotLimitedAt(ip, accountKey, Date.now());
+  return forgotDecision(ip, accountKey, Date.now()) === 'limited';
 }
 
 export function forgotBucketCount(): number {

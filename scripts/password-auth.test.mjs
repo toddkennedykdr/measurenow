@@ -623,6 +623,20 @@ async function main() {
     }
     check('forgot account limit trips on the sixth try', accountLimited === 6);
 
+    const capUser = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1,$2,$3,'user',false,$4) RETURNING id`,
+      ['capuser', bcrypt.hashSync(PW.ada, 10), 'Cap User', 'cap.user@example.com'],
+    );
+    const capId = Number(capUser.rows[0].id);
+    const beforeCap = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [capId])).rows[0].n);
+    for (let n = 1; n <= 5; n += 1) {
+      const timed = await jpostTimed('/api/auth/forgot-password', { identifier: 'capuser' }, { ip: `198.51.100.${200 + n}` });
+      if (timed.status !== 200) throw new Error(`cap attempt ${n} status ${timed.status}`);
+    }
+    const capped = await jpostTimed('/api/auth/forgot-password', { identifier: 'CAPUSER' }, { ip: '198.51.100.206' });
+    const afterCap = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [capId])).rows[0].n);
+    check('an exhausted account sends nothing on the next try', capped.status === 429 && afterCap === beforeCap + 5);
+
     const edited = await jpatch(`/api/admin/users/${copyId}`, { email: '  Other@Example.com ' }, { cookie: toddCookie });
     check('admin email edit normalizes', edited.status === 200 && edited.data.user.email === 'other@example.com' && !JSON.stringify(edited.data).includes('password'));
     const cleared = await jpatch(`/api/admin/users/${copyId}`, { email: '   ' }, { cookie: toddCookie });

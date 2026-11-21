@@ -21,7 +21,7 @@ import {
 } from '../authz';
 import {
   forgotAccountKey,
-  forgotLimited,
+  forgotDecision,
   forgotWaitMs,
   issuePasswordReset,
   passwordResetUrl,
@@ -326,11 +326,12 @@ authRouter.post('/forgot-password', asyncRoute(async (req: Request, res: Respons
   } catch {
     console.error('forgot-password failed');
   }
-  if (forgotLimited(String(req.ip || ''), accountKey)) {
+  const decision = forgotDecision(String(req.ip || ''), accountKey, Date.now());
+  if (decision === 'limited') {
     return res.status(429).json(FORGOT_LIMIT);
   }
   try {
-    if (user) await queueForgotSend(user);
+    if (decision === 'allow' && user) await queueForgotSend(user);
   } catch {
     console.error('forgot-password failed');
   }
