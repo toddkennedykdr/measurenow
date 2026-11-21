@@ -738,6 +738,89 @@ async function main() {
         && Math.abs(Number(unconfiguredLeft.rows[0]?.seconds) - 24 * 60 * 60) <= 90
         && !log.includes(unconfiguredToken),
     );
+
+    const badId = await jpatch('/api/admin/users/14abc', { disabled: true }, { cookie: toddCookie });
+    const sciId = await jpatch('/api/admin/users/1e3', { disabled: false }, { cookie: toddCookie });
+    check('user ids must be plain integers', badId.status === 400 && sciId.status === 400 && badId.data.error === 'Invalid user');
+    const nulEmail = await jpatch(`/api/admin/users/${copyId}`, { email: 'a\u0000@b.co' }, { cookie: toddCookie });
+    const commaEmail = await jpatch(`/api/admin/users/${copyId}`, { email: 'a,b@example.com' }, { cookie: toddCookie });
+    const spaceEmail = await jpatch(`/api/admin/users/${copyId}`, { email: 'a b@example.com' }, { cookie: toddCookie });
+    const bracketEmail = await jpatch(`/api/admin/users/${copyId}`, { email: 'Ann <a@example.com>' }, { cookie: toddCookie });
+    check('admin email rejects controls and extra characters', nulEmail.status === 400 && commaEmail.status === 400 && spaceEmail.status === 400 && bracketEmail.status === 400);
+    const dupEmail = await jpatch(`/api/admin/users/${copyId}`, { email: 'ADA@example.com' }, { cookie: toddCookie });
+    check('duplicate email is rejected', dupEmail.status === 409 && dupEmail.data.error === 'That email is already in use');
+
+    await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1,$2,$3,'user',false,$4)`,
+      ['shareduser', bcrypt.hashSync(PW.ada, 10), 'Shared User', 'shared.user@example.com'],
+    );
+    let sharedOk = true;
+    let sharedLimited = 0;
+    for (let n = 1; n <= 6; n += 1) {
+      const ident = n === 6 ? 'Shared.User@Example.com' : 'shareduser';
+      const timed = await jpostTimed('/api/auth/forgot-password', { identifier: ident }, { ip: `198.51.100.${80 + n}` });
+      if (n < 6) sharedOk = sharedOk && timed.status === 200;
+      if (timed.status === 429) sharedLimited = n;
+    }
+    check('username and email for one account share a limit', sharedOk && sharedLimited === 6);
+
+    const sess = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['sessuser', bcrypt.hashSync(PW.ada, 10), 'Sess User'],
+    );
+    const sessId = Number(sess.rows[0].id);
+    const sessLogin = await jpost('/api/auth/login', { username: 'sessuser', password: PW.ada });
+    const sessLink = await jpost(`/api/admin/users/${sessId}/reset-link`, {}, { cookie: toddCookie });
+    const sessToken = String(sessLink.data.link || '').split('/').pop();
+    track(sessLink.data.link || '');
+    track(sessToken);
+    const sessReset = await jpost('/api/auth/reset-password', { token: sessToken, password: PW.third });
+    const sessOld = await jget('/api/auth/me', { cookie: sessLogin.cookie });
+    const sessNew = await jpost('/api/auth/login', { username: 'sessuser', password: PW.third });
+    check('reset destroys existing sessions', sessReset.status === 200 && sessOld.status === 401 && sessNew.status === 200);
+
+    const hold = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['holduser', bcrypt.hashSync(PW.ada, 10), 'Hold User'],
+    );
+    const holdId = Number(hold.rows[0].id);
+    const holdLink = await jpost(`/api/admin/users/${holdId}/reset-link`, {}, { cookie: toddCookie });
+    const holdToken = String(holdLink.data.link || '').split('/').pop();
+    track(holdLink.data.link || '');
+    track(holdToken);
+    const holdOff = await jpatch(`/api/admin/users/${holdId}`, { disabled: true }, { cookie: toddCookie });
+    const holdLook = await jget(`/api/auth/reset-password/${encodeURIComponent(holdToken)}`);
+    check('disable invalidates unused reset links', holdOff.status === 200 && holdLook.status === 400 && holdLook.data.error === GENERIC);
+
+    const delayLog = path.join(os.tmpdir(), `mn-delay-${process.pid}.log`);
+    fs.writeFileSync(delayLog, '');
+    const srv3 = spawn(process.execPath, entry, {
+      cwd: root,
+      env: childEnv({ PORT: '3190', OUTBOUND_DELAY_MS: '2500', OUTBOUND_LOG: delayLog }),
+    });
+    srv3.stdout.on('data', d => { log += d; });
+    srv3.stderr.on('data', d => { log += d; });
+    for (let i = 0; i < 50; i += 1) {
+      try {
+        const res = await fetch('http://127.0.0.1:3190/api/auth/me');
+        if (res.status === 401 || res.status === 200) break;
+      } catch { /* still booting */ }
+      if (i === 49) throw new Error('delay server did not start');
+      await new Promise(r => setTimeout(r, 200));
+    }
+    await client.query(`UPDATE users SET email = 'sess.user@example.com' WHERE id = $1`, [sessId]);
+    const delayStarted = Date.now();
+    const delayed = await fetch('http://127.0.0.1:3190/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.120' },
+      body: JSON.stringify({ identifier: 'sessuser' }),
+    });
+    const delayMs = Date.now() - delayStarted;
+    const delayBody = await delayed.json();
+    await new Promise(r => setTimeout(r, 3000));
+    const delayMail = fs.readFileSync(delayLog, 'utf8');
+    if (srv3.pid) srv3.kill();
+    check('slow reset mail does not hold the forgot response', delayed.status === 200 && JSON.stringify(delayBody) === '{"ok":true}' && delayMs < 1800 && delayMail.includes('sess.user@example.com'));
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));

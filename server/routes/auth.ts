@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { db, pool, schema } from '../db';
 import { loadSessionUser, perIpLimit, requireAuth } from '../middleware/security';
+import { destroySessionsForUser } from '../sessionStore';
 import {
   decideInviteAccept,
   decidePasswordReset,
@@ -221,6 +222,11 @@ authRouter.post('/reset-password', resetLimit, async (req: Request, res: Respons
       return res.status(400).json({ error: RESET_LINK_ERROR });
     }
     await client.query('COMMIT');
+    try {
+      await destroySessionsForUser(Number(row.user_id));
+    } catch {
+      console.error('session revoke failed');
+    }
     return res.json({ ok: true });
   } catch {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }
@@ -234,8 +240,8 @@ authRouter.post('/reset-password', resetLimit, async (req: Request, res: Respons
 const FORGOT_OK = { ok: true };
 const FORGOT_LIMIT = { error: 'Too many reset requests. Please wait and try again.' };
 
-async function maybeSendForgot(lookup: ReturnType<typeof forgotAccountKey>['lookup']) {
-  if (!lookup || !resetEmailConfigured()) return;
+async function findForgotUser(lookup: ReturnType<typeof forgotAccountKey>['lookup']) {
+  if (!lookup) return null;
   const found = lookup.kind === 'email'
     ? await pool.query(
       `SELECT id, disabled, email FROM users WHERE lower(email) = $1`,
@@ -245,12 +251,16 @@ async function maybeSendForgot(lookup: ReturnType<typeof forgotAccountKey>['look
       `SELECT id, disabled, email FROM users WHERE username = $1`,
       [lookup.username],
     );
-  if (found.rows.length !== 1) return;
-  const user = found.rows[0];
-  const address = typeof user.email === 'string' ? user.email.trim() : '';
-  if (user.disabled || !address) return;
+  if (found.rows.length !== 1) return null;
+  return found.rows[0] as { id: number; disabled: boolean; email: string | null };
+}
 
+/** Mint after the response clock has started. The Resend call runs only after commit and is not awaited. */
+async function queueForgotSend(user: { id: number; disabled: boolean; email: string | null }) {
+  const address = typeof user.email === 'string' ? user.email.trim() : '';
+  if (user.disabled || !address || !resetEmailConfigured()) return;
   const client = await pool.connect();
+  let token = '';
   try {
     await client.query('BEGIN');
     const issued = await issuePasswordReset(client, Number(user.id), RESET_EMAIL_HOURS);
@@ -264,14 +274,12 @@ async function maybeSendForgot(lookup: ReturnType<typeof forgotAccountKey>['look
       await client.query('ROLLBACK');
       return;
     }
-    try {
-      await sendPasswordResetEmail(currentEmail, passwordResetUrl(issued.token), RESET_EMAIL_HOURS);
-    } catch {
-      await client.query('ROLLBACK');
-      console.error('reset email failed');
-      return;
-    }
+    token = issued.token;
     await client.query('COMMIT');
+    const link = passwordResetUrl(token);
+    void sendPasswordResetEmail(currentEmail, link, RESET_EMAIL_HOURS).catch(() => {
+      console.error('reset email failed');
+    });
   } catch {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }
     console.error('forgot-password failed');
@@ -285,11 +293,19 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
   const started = Date.now();
   const waitMs = forgotWaitMs();
   const parsed = forgotAccountKey(req.body?.identifier);
-  if (forgotLimited(String(req.ip || ''), parsed.key)) {
+  let accountKey = parsed.key;
+  let user: { id: number; disabled: boolean; email: string | null } | null = null;
+  try {
+    user = await findForgotUser(parsed.lookup);
+    if (user) accountKey = `id:${Number(user.id)}`;
+  } catch {
+    console.error('forgot-password failed');
+  }
+  if (forgotLimited(String(req.ip || ''), accountKey)) {
     return res.status(429).json(FORGOT_LIMIT);
   }
   try {
-    await maybeSendForgot(parsed.lookup);
+    if (user) await queueForgotSend(user);
   } catch {
     console.error('forgot-password failed');
   }

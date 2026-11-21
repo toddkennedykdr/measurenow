@@ -21,7 +21,7 @@ const {
   emailProblem, nameProblem, publicUser, summarizeOrder,
   decidePasswordReset, newResetToken, hashResetToken, resetTokenProblem, parseResetHours,
   mintResetUserAllowed, passwordResetError, RESET_LINK_ERROR, RESET_MAX_HOURS, RESET_TOKEN_BYTES,
-  sessionIsStaff, normalizeUserEmail,
+  sessionIsStaff, normalizeUserEmail, strictUserId,
 } = authz;
 
 check('logged out is 401', accessDecision(null, true) === 401);
@@ -74,6 +74,8 @@ const withEmail = publicUser({
 }, { includeEmail: true });
 check('admin view normalizes email and still drops the hash', withEmail.email === 'ada@example.com' && !('passwordHash' in withEmail) && !JSON.stringify(withEmail).includes('should-not-leak'));
 check('empty email clears and a bad email is refused', normalizeUserEmail('  ').ok === true && normalizeUserEmail('  ').email === null && normalizeUserEmail('not-an-email').ok === false);
+check('email is one plain address', normalizeUserEmail('Ada@Example.com').email === 'ada@example.com' && normalizeUserEmail('a,b@c.com').ok === false && normalizeUserEmail('a b@c.com').ok === false && normalizeUserEmail('a<b>@c.com').ok === false && normalizeUserEmail('a\u0000@b.co').ok === false);
+check('route ids are strict integers', strictUserId('14') === 14 && strictUserId('14abc') === null && strictUserId('1e3') === null && strictUserId('0') === null && strictUserId('01') === null);
 check('staff session requires an enabled account', sessionIsStaff(null) === false && sessionIsStaff({ disabled: true }) === false && sessionIsStaff({ disabled: false }) === true);
 check('unknown role becomes user', publicUser({ id: 2, name: 'A', username: 'a', role: 'owner', createdAt: '2026-01-01' }).role === 'user');
 
@@ -133,6 +135,18 @@ check('mint source does not print the token or link', !mintSrc.includes('console
 const resetSrc = fs.readFileSync(path.join(root, 'server/passwordReset.ts'), 'utf8');
 check('reset mailer does not log the link or token', !resetSrc.includes('console.log') && !resetSrc.includes('console.error(link)') && !resetSrc.includes('console.error(token)') && !resetSrc.includes('console.error(err'));
 check('forgot-password is not behind the staff-skipping limiter', authSrc.includes("authRouter.post('/forgot-password'") && !authSrc.includes("perIpLimit('forgot"));
+check('reset mail leaves the database before the send', authSrc.includes('void sendPasswordResetEmail') && authSrc.includes("await client.query('COMMIT')"));
+
+const resetMod = require(path.join(root, 'dist-server/passwordReset.js'));
+const staleAt = Date.now() - (resetMod.FORGOT_WINDOW_MS + 5000);
+resetMod.forgotLimitedAt('192.0.2.8', 'user:stale', staleAt);
+const beforePrune = resetMod.forgotBucketCount();
+resetMod.forgotLimitedAt('192.0.2.9', 'user:live', Date.now());
+check('expired forgot keys are removed', beforePrune === 2 && resetMod.forgotBucketCount() === 2);
+for (let i = 0; i < resetMod.FORGOT_CAP + 25; i += 1) {
+  resetMod.forgotLimitedAt('203.0.113.9', `user:cap${i}`, Date.now());
+}
+check('forgot map stays within the cap', resetMod.forgotBucketCount() <= resetMod.FORGOT_CAP);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -22,6 +22,7 @@ import {
   newInviteToken,
   normalizeUserEmail,
   publicUser,
+  strictUserId,
   summarizeOrder,
   usernameProblem,
 } from '../authz';
@@ -52,8 +53,8 @@ adminRouter.get('/users', async (_req: Request, res: Response) => {
 });
 
 adminRouter.patch('/users/:id', async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) return res.status(404).json({ error: 'User not found' });
+  const id = strictUserId(req.params.id);
+  if (id == null) return res.status(400).json({ error: 'Invalid user' });
   const body = req.body ?? {};
   const touchesDisabled = Object.prototype.hasOwnProperty.call(body, 'disabled');
   const touchesEmail = Object.prototype.hasOwnProperty.call(body, 'email');
@@ -73,6 +74,14 @@ adminRouter.patch('/users/:id', async (req: Request, res: Response) => {
   const target = rows[0];
   if (!target) return res.status(404).json({ error: 'User not found' });
 
+  if (touchesEmail && email) {
+    const dup = await pool.query(
+      `SELECT id FROM users WHERE lower(email) = $1 AND id <> $2 LIMIT 1`,
+      [email, id],
+    );
+    if (dup.rows[0]) return res.status(409).json({ error: 'That email is already in use' });
+  }
+
   if (touchesDisabled && disabled && target.role === 'admin') {
     const others = await pool.query(
       `SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin' AND disabled = false AND id <> $1`,
@@ -86,6 +95,10 @@ adminRouter.patch('/users/:id', async (req: Request, res: Response) => {
   if (touchesEmail) patch.email = email;
   await db.update(schema.users).set(patch).where(eq(schema.users.id, id));
   if (touchesDisabled && disabled) {
+    await pool.query(
+      `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE user_id = $1 AND used_at IS NULL`,
+      [id],
+    );
     try {
       await destroySessionsForUser(id);
     } catch {
@@ -108,8 +121,8 @@ const resetLinkLimit = rateLimit({
 });
 
 adminRouter.post('/users/:id/reset-link', resetLinkLimit, async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) return res.status(404).json({ error: 'User not found' });
+  const id = strictUserId(req.params.id);
+  if (id == null) return res.status(400).json({ error: 'Invalid user' });
   const me = current(req);
   const rows = await db.select(userColumns).from(schema.users).where(eq(schema.users.id, id)).limit(1);
   const target = rows[0];
@@ -120,6 +133,7 @@ adminRouter.post('/users/:id/reset-link', resetLinkLimit, async (req: Request, r
   const emailIt = address.length > 0 && resetEmailConfigured();
   const hours = emailIt ? RESET_EMAIL_HOURS : RESET_COPY_HOURS;
   const client = await pool.connect();
+  let link = '';
   try {
     await client.query('BEGIN');
     const issued = await issuePasswordReset(client, id, hours);
@@ -128,22 +142,8 @@ adminRouter.post('/users/:id/reset-link', resetLinkLimit, async (req: Request, r
       if (issued.reason === 'disabled') return res.status(400).json({ error: 'That account is disabled.' });
       return res.status(404).json({ error: 'User not found' });
     }
-    const link = passwordResetUrl(issued.token);
-    if (emailIt) {
-      try {
-        await sendPasswordResetEmail(address, link, hours);
-      } catch {
-        await client.query('ROLLBACK');
-        console.error('reset email failed');
-        return res.status(500).json({ error: 'Could not send the reset link' });
-      }
-      await client.query('COMMIT');
-      auditAdmin(me.id, id, 'reset-link');
-      return res.json({ sent: true });
-    }
+    link = passwordResetUrl(issued.token);
     await client.query('COMMIT');
-    auditAdmin(me.id, id, 'reset-link');
-    return res.json({ sent: false, reason: resetLinkFallbackReason(address.length > 0), link });
   } catch {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }
     console.error('reset link failed');
@@ -151,6 +151,18 @@ adminRouter.post('/users/:id/reset-link', resetLinkLimit, async (req: Request, r
   } finally {
     client.release();
   }
+  if (emailIt) {
+    try {
+      await sendPasswordResetEmail(address, link, hours);
+    } catch {
+      console.error('reset email failed');
+      return res.status(500).json({ error: 'Could not send the reset link' });
+    }
+    auditAdmin(me.id, id, 'reset-link');
+    return res.json({ sent: true });
+  }
+  auditAdmin(me.id, id, 'reset-link');
+  return res.json({ sent: false, reason: resetLinkFallbackReason(address.length > 0), link });
 });
 
 adminRouter.get('/invites', async (_req: Request, res: Response) => {
@@ -215,8 +227,8 @@ adminRouter.post('/invites', async (req: Request, res: Response) => {
 });
 
 adminRouter.post('/invites/:id/revoke', async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) return res.status(404).json({ error: 'Invite not found' });
+  const id = strictUserId(req.params.id);
+  if (id == null) return res.status(400).json({ error: 'Invalid invite' });
   const result = await pool.query(
     `UPDATE invites SET revoked_at = NOW()
      WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL

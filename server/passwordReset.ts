@@ -115,28 +115,60 @@ export async function sendPasswordResetEmail(to: string, link: string, hours: nu
       text,
       html,
     }),
+    signal: AbortSignal.timeout(3000),
   });
   if (!res.ok) throw new Error('reset-email-failed');
 }
 
+export const FORGOT_CAP = 1000;
 const forgotHits = new Map<string, number[]>();
+
+function pruneForgot(now: number) {
+  for (const [key, stamps] of forgotHits) {
+    const kept = stamps.filter((at) => now - at < FORGOT_WINDOW_MS);
+    if (kept.length === 0) forgotHits.delete(key);
+    else forgotHits.set(key, kept);
+  }
+  while (forgotHits.size > FORGOT_CAP) {
+    const oldest = forgotHits.keys().next().value;
+    if (oldest === undefined) break;
+    forgotHits.delete(oldest);
+  }
+}
+
+const forgotPruneTimer = setInterval(() => pruneForgot(Date.now()), 60_000);
+if (typeof forgotPruneTimer.unref === 'function') forgotPruneTimer.unref();
 
 function hitsWithin(key: string, now: number): number[] {
   const kept = (forgotHits.get(key) || []).filter((at) => now - at < FORGOT_WINDOW_MS);
-  forgotHits.set(key, kept);
+  if (kept.length === 0) forgotHits.delete(key);
+  else forgotHits.set(key, kept);
   return kept;
 }
 
 /** True when this IP or this account key is over the window. A session cookie is not consulted. */
-export function forgotLimited(ip: string, accountKey: string | null): boolean {
-  const now = Date.now();
+export function forgotLimitedAt(ip: string, accountKey: string | null, now: number): boolean {
+  pruneForgot(now);
   const ipHits = hitsWithin(`ip:${ip}`, now);
   const accountHits = accountKey ? hitsWithin(`acct:${accountKey}`, now) : null;
   if (ipHits.length >= FORGOT_MAX) return true;
   if (accountHits && accountHits.length >= FORGOT_MAX) return true;
   ipHits.push(now);
-  if (accountHits) accountHits.push(now);
+  forgotHits.set(`ip:${ip}`, ipHits);
+  if (accountHits && accountKey) {
+    accountHits.push(now);
+    forgotHits.set(`acct:${accountKey}`, accountHits);
+  }
+  pruneForgot(now);
   return false;
+}
+
+export function forgotLimited(ip: string, accountKey: string | null): boolean {
+  return forgotLimitedAt(ip, accountKey, Date.now());
+}
+
+export function forgotBucketCount(): number {
+  return forgotHits.size;
 }
 
 export function forgotWaitMs(): number {

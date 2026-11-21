@@ -11,6 +11,10 @@ globalThis.fetch = async (url, opts) => {
   let host = 'unknown';
   try { host = new URL(target).host; } catch { /* leave unknown */ }
   console.log(`[fetch-stub] blocked outbound call to ${host}`);
+  const delayMs = Number(process.env.OUTBOUND_DELAY_MS || '0');
+  if (host === 'api.resend.com' && delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
   if (host === 'api.resend.com' && process.env.OUTBOUND_LOG && opts && opts.body) {
     fs.appendFileSync(process.env.OUTBOUND_LOG, String(opts.body) + '\n');
   }

@@ -128,7 +128,16 @@ export function decideInviteAccept(input: {
 }
 
 const USERNAME_RE = /^[A-Za-z0-9._-]{2,40}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}$/;
+const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/;
+
+/** Path ids are decimal integers only. `14abc` and `1e3` are not ids. */
+export function strictUserId(raw: unknown): number | null {
+  if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw)) return null;
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id)) return null;
+  return id;
+}
 
 export function usernameProblem(username: unknown): string | null {
   if (typeof username !== 'string' || !USERNAME_RE.test(username.trim())) {
@@ -139,7 +148,11 @@ export function usernameProblem(username: unknown): string | null {
 
 export function emailProblem(email: unknown): string | null {
   if (email == null || email === '') return null;
-  if (typeof email !== 'string' || email.length > 120 || !EMAIL_RE.test(email.trim())) return 'Enter a valid email or leave it blank';
+  if (typeof email !== 'string') return 'Enter a valid email or leave it blank';
+  const trimmed = email.trim();
+  if (!trimmed) return null;
+  if (CONTROL_CHARS.test(trimmed)) return 'Invalid characters';
+  if (trimmed.length > 120 || /[\s,<>]/.test(trimmed) || !EMAIL_RE.test(trimmed)) return 'Enter a valid email or leave it blank';
   return null;
 }
 
