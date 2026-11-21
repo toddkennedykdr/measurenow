@@ -69,6 +69,14 @@ export function controlCharIn(value: unknown): boolean {
   return false;
 }
 
+/** Report prose may contain newlines, tabs, and other Unicode. Only NUL is refused. */
+export function nulCharIn(value: unknown): boolean {
+  if (typeof value === 'string') return value.includes('\u0000');
+  if (Array.isArray(value)) return value.some(nulCharIn);
+  if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(nulCharIn);
+  return false;
+}
+
 /** Serial ids are positive 32-bit integers. `14abc`, `1e3`, and oversized values are not. */
 export function strictRowId(raw: unknown): number | null {
   if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw)) return null;

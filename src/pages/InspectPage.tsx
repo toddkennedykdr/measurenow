@@ -161,6 +161,7 @@ export default function InspectPage() {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [showJN, setShowJN] = useState(false);
   const [savedReportId, setSavedReportId] = useState<number | null>(null);
+  const [historyToast, setHistoryToast] = useState('');
   const { user } = useAuth();
 
   const mapRef = useRef<HTMLDivElement>(null);
@@ -314,8 +315,11 @@ export default function InspectPage() {
           body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote, photos: thumbnails }),
         });
         const saveData = await saveRes.json();
-        if (saveData.id) setSavedReportId(saveData.id);
-      } catch {}
+        if (!saveRes.ok || !saveData.id) throw new Error('save failed');
+        setSavedReportId(saveData.id);
+      } catch {
+        setHistoryToast('Couldn\'t save to history');
+      }
     } catch (err: any) {
       setError(err.message || 'Analysis failed');
       setStep('photos');
@@ -386,6 +390,7 @@ export default function InspectPage() {
       </header>
 
       {error && <div className="error-msg">{error}</div>}
+      {historyToast && <div className="admin-toast" role="status">{historyToast}</div>}
 
       {/* STEP: Address */}
       {step === 'address' && (
