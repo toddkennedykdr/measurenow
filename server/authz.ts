@@ -74,9 +74,12 @@ export function controlCharIn(value: unknown): boolean {
   return false;
 }
 
-/** Report prose may contain newlines, tabs, and other Unicode. Only NUL is refused. */
+/** C0 controls other than TAB, LF, and CR. Report prose may keep those three and any other Unicode. */
+const REPORT_C0 = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/;
+
+/** True when report text contains NUL or another forbidden C0 control. */
 export function nulCharIn(value: unknown): boolean {
-  if (typeof value === 'string') return value.includes('\u0000');
+  if (typeof value === 'string') return REPORT_C0.test(value);
   if (Array.isArray(value)) return value.some(nulCharIn);
   if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(nulCharIn);
   return false;
