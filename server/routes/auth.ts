@@ -255,7 +255,7 @@ async function findForgotUser(lookup: ReturnType<typeof forgotAccountKey>['looku
       [lookup.email],
     )
     : await pool.query(
-      `SELECT id, disabled, email FROM users WHERE username = $1`,
+      `SELECT id, disabled, email FROM users WHERE lower(username) = lower($1)`,
       [lookup.username],
     );
   if (found.rows.length !== 1) return null;

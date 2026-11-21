@@ -186,7 +186,7 @@ export type ForgotLookup =
   | { kind: 'username'; username: string }
   | null;
 
-/** Username stays case-sensitive, matching login. An address is matched in lowercase. */
+/** Login stays case-sensitive. Forgot-password matches either field without regard to case. */
 export function forgotAccountKey(raw: unknown): { key: string | null; lookup: ForgotLookup } {
   if (typeof raw !== 'string') return { key: null, lookup: null };
   const trimmed = raw.trim();
@@ -195,5 +195,5 @@ export function forgotAccountKey(raw: unknown): { key: string | null; lookup: Fo
     const email = trimmed.toLowerCase();
     return { key: `email:${email}`, lookup: { kind: 'email', email } };
   }
-  return { key: `user:${trimmed}`, lookup: { kind: 'username', username: trimmed } };
+  return { key: `user:${trimmed.toLowerCase()}`, lookup: { kind: 'username', username: trimmed } };
 }

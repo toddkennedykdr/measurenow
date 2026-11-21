@@ -587,7 +587,7 @@ async function main() {
       ['missing', 'nobody-user'],
       ['disabled', 'Pat'],
       ['no-email', 'nomail'],
-      ['wrong-case-username', 'ada'],
+      ['other-case-username', 'ada'],
       ['email-case', 'ADA@Example.com'],
     ];
     const beforeForgot = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets`)).rows[0].n);
@@ -602,7 +602,9 @@ async function main() {
     const forgotTokens = [...new Set([...forgotMail.matchAll(/\/reset\/([A-Za-z0-9_-]{43})/g)].map(match => match[1]))];
     for (const token of forgotTokens) track(token);
     check('forgot responses are identical', new Set(bodies).size === 1 && bodies[0] === '{"ok":true}');
-    check('forgot sends only for the enabled account with an email', afterForgot === beforeForgot + 2 && forgotTokens.length === 2);
+    check('forgot sends for the account by either case of the username', afterForgot === beforeForgot + 3 && forgotTokens.length === 3);
+    const caseLogin = await jpost('/api/auth/login', { username: 'ada', password: PW.adaNext });
+    check('login stays case-sensitive', caseLogin.status === 401);
     check('forgot tokens stay out of the server log', forgotTokens.every(token => token && !log.includes(token)));
 
     const limitIp = '198.51.100.40';
@@ -764,6 +766,20 @@ async function main() {
       if (timed.status === 429) sharedLimited = n;
     }
     check('username and email for one account share a limit', sharedOk && sharedLimited === 6);
+
+    const caseA = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1,$2,$3,'user',false,$4) RETURNING id`,
+      ['CaseOne', bcrypt.hashSync(PW.ada, 10), 'Case One', 'case.one@example.com'],
+    );
+    const caseB = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1,$2,$3,'user',false,$4) RETURNING id`,
+      ['caseone', bcrypt.hashSync(PW.ada, 10), 'Case Two', 'case.two@example.com'],
+    );
+    const caseIds = [Number(caseA.rows[0].id), Number(caseB.rows[0].id)];
+    const beforeAmbiguous = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = ANY($1::int[])`, [caseIds])).rows[0].n);
+    const ambiguous = await jpostTimed('/api/auth/forgot-password', { identifier: 'CASEONE' }, { ip: '198.51.100.130' });
+    const afterAmbiguous = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = ANY($1::int[])`, [caseIds])).rows[0].n);
+    check('ambiguous username case sends nothing', ambiguous.status === 200 && JSON.stringify(ambiguous.data) === '{"ok":true}' && ambiguous.ms >= 790 && afterAmbiguous === beforeAmbiguous);
 
     const sess = await client.query(
       `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
