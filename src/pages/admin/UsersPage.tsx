@@ -213,7 +213,7 @@ export default function UsersPage() {
       {resetOffer && (
         <div className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="reset-title">
           <div className="admin-modal__card">
-            <p id="reset-title">{resetOffer.reason}</p>
+            <p id="reset-title">{resetOffer.reason === 'Email failed' ? 'Email failed' : resetOffer.reason}</p>
             <p className="admin-hint">This link is shown once. It expires in 24 hours.</p>
             <div className="admin-linkbox__row">
               <input className="input" readOnly value={resetOffer.link} aria-label="Password reset link" />

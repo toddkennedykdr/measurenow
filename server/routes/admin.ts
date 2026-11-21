@@ -12,7 +12,9 @@ import {
   RESET_EMAIL_HOURS,
   resetEmailConfigured,
   resetLinkFallbackReason,
+  retireOlderPasswordResets,
   sendPasswordResetEmail,
+  widenPasswordReset,
 } from '../passwordReset';
 import {
   INVITE_TTL_MS,
@@ -139,14 +141,16 @@ adminRouter.post('/users/:id/reset-link', resetLinkLimit, asyncRoute(async (req:
   const hours = emailIt ? RESET_EMAIL_HOURS : RESET_COPY_HOURS;
   const client = await pool.connect();
   let link = '';
+  let resetToken = '';
   try {
     await client.query('BEGIN');
-    const issued = await issuePasswordReset(client, id, hours);
+    const issued = await issuePasswordReset(client, id, hours, { keepOlder: emailIt });
     if (!issued.ok) {
       await client.query('ROLLBACK');
       if (issued.reason === 'disabled') return res.status(400).json({ error: 'That account is disabled.' });
       return res.status(404).json({ error: 'User not found' });
     }
+    resetToken = issued.token;
     link = passwordResetUrl(issued.token);
     await client.query('COMMIT');
   } catch {
@@ -161,7 +165,18 @@ adminRouter.post('/users/:id/reset-link', resetLinkLimit, asyncRoute(async (req:
       await sendPasswordResetEmail(address, link, hours);
     } catch {
       console.error('reset email failed');
-      return res.status(500).json({ error: 'Could not send the reset link' });
+      try {
+        await widenPasswordReset(resetToken, RESET_COPY_HOURS);
+      } catch {
+        console.error('reset email failed');
+      }
+      auditAdmin(me.id, id, 'reset-link');
+      return res.json({ sent: false, reason: 'Email failed', link });
+    }
+    try {
+      await retireOlderPasswordResets(id, resetToken);
+    } catch {
+      console.error('reset email failed');
     }
     auditAdmin(me.id, id, 'reset-link');
     return res.json({ sent: true });

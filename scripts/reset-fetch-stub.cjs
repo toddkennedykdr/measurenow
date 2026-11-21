@@ -11,17 +11,35 @@ globalThis.fetch = async (url, opts) => {
   let host = 'unknown';
   try { host = new URL(target).host; } catch { /* leave unknown */ }
   console.log(`[fetch-stub] blocked outbound call to ${host}`);
-  const delayMs = Number(process.env.OUTBOUND_DELAY_MS || '0');
-  if (host === 'api.resend.com' && delayMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  if (host === 'api.resend.com' && process.env.OUTBOUND_LOG && opts && opts.body) {
-    fs.appendFileSync(process.env.OUTBOUND_LOG, String(opts.body) + '\n');
-  }
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
     status,
     headers: { 'content-type': 'application/json' },
   });
+  const delayMs = Number(process.env.OUTBOUND_DELAY_MS || '0');
+  if (host === 'api.resend.com' && delayMs > 0) {
+    await new Promise((resolve, reject) => {
+      const signal = opts && opts.signal;
+      const timer = setTimeout(() => {
+        if (signal) signal.removeEventListener('abort', abort);
+        resolve();
+      }, delayMs);
+      if (!signal) return;
+      const abort = () => {
+        clearTimeout(timer);
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
+    });
+  }
+  if (host === 'api.resend.com' && process.env.OUTBOUND_FAIL === '1') {
+    return json({ error: 'stubbed' }, 500);
+  }
+  if (host === 'api.resend.com' && process.env.OUTBOUND_LOG && opts && opts.body) {
+    fs.appendFileSync(process.env.OUTBOUND_LOG, String(opts.body) + '\n');
+  }
   if (host === 'maps.googleapis.com') {
     return json({
       status: 'OK',

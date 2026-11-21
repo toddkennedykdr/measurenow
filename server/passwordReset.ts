@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { hashResetToken, newResetToken } from './authz';
+import { pool } from './db';
 
 /** Same public origin the reset CLI already uses. Never taken from a request Host header. */
 export const RESET_BASE_URL = 'https://measurenow-production.up.railway.app';
@@ -43,10 +44,15 @@ export type ResetIssue =
   | { ok: false; reason: 'missing' | 'disabled' };
 
 /**
- * Invalidate unused links for this user and insert one new hash.
+ * Insert one new hash. Unused links are invalidated first unless keepOlder is set.
  * The caller owns the transaction. Disabled users get no row and no hash.
  */
-export async function issuePasswordReset(client: PoolClient, userId: number, hours: number): Promise<ResetIssue> {
+export async function issuePasswordReset(
+  client: PoolClient,
+  userId: number,
+  hours: number,
+  options?: { keepOlder?: boolean },
+): Promise<ResetIssue> {
   const found = await client.query(
     `SELECT id, disabled FROM users WHERE id = $1 FOR UPDATE`,
     [userId],
@@ -55,10 +61,12 @@ export async function issuePasswordReset(client: PoolClient, userId: number, hou
   if (!user) return { ok: false, reason: 'missing' };
   if (user.disabled) return { ok: false, reason: 'disabled' };
 
-  await client.query(
-    `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE user_id = $1 AND used_at IS NULL`,
-    [userId],
-  );
+  if (!options?.keepOlder) {
+    await client.query(
+      `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE user_id = $1 AND used_at IS NULL`,
+      [userId],
+    );
+  }
   const token = newResetToken();
   const inserted = await client.query(
     `INSERT INTO password_resets (user_id, token_hash, expires_at)
@@ -74,6 +82,26 @@ export async function issuePasswordReset(client: PoolClient, userId: number, hou
     throw new Error('reset-expiry-missing');
   }
   return { ok: true, token, expiresUtc, expiresEt };
+}
+
+/** After a successful send, older unused links for this user stop working. */
+export async function retireOlderPasswordResets(userId: number, keepToken: string): Promise<void> {
+  await pool.query(
+    `UPDATE password_resets
+     SET used_at = (NOW() AT TIME ZONE 'UTC')
+     WHERE user_id = $1 AND used_at IS NULL AND token_hash <> $2`,
+    [userId, hashResetToken(keepToken)],
+  );
+}
+
+/** A link that could not be emailed is the 24-hour copy, not the one-hour mail link. */
+export async function widenPasswordReset(token: string, hours: number): Promise<void> {
+  await pool.query(
+    `UPDATE password_resets
+     SET expires_at = (NOW() AT TIME ZONE 'UTC') + make_interval(hours => trunc($2::numeric)::int, secs => (($2::numeric - trunc($2::numeric)) * 3600)::double precision)
+     WHERE token_hash = $1 AND used_at IS NULL`,
+    [hashResetToken(token), hours],
+  );
 }
 
 /** Plain reset mail. The link is the body, not a log line. */

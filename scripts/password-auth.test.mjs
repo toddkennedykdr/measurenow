@@ -182,6 +182,7 @@ async function main() {
   let log = '';
   const srv = spawn(process.execPath, entry, { cwd: root, env: childEnv() });
   let srv2 = null;
+  const sideServers = [];
   srv.stdout.on('data', d => { log += d; });
   srv.stderr.on('data', d => { log += d; });
 
@@ -566,6 +567,93 @@ async function main() {
     const mailedReuse = await jpost('/api/auth/reset-password', { token: mailedToken, password: PW.adaNext });
     check('emailed link is single use', mailedUse.status === 200 && mailedReuse.status === 400 && mailedReuse.data.error === GENERIC);
 
+    async function bootSide(port, extraEnv) {
+      const child = spawn(process.execPath, entry, { cwd: root, env: childEnv({ PORT: String(port), ...extraEnv }) });
+      sideServers.push(child);
+      let sideLog = '';
+      child.stdout.on('data', d => { sideLog += d; });
+      child.stderr.on('data', d => { sideLog += d; });
+      const base = `http://127.0.0.1:${port}`;
+      for (let i = 0; i < 50; i += 1) {
+        try {
+          const res = await fetch(base + '/api/auth/me');
+          if (res.status === 401 || res.status === 200) break;
+        } catch { /* still booting */ }
+        if (i === 49) throw new Error(`side server ${port} did not start`);
+        await new Promise(r => setTimeout(r, 200));
+      }
+      const login = await fetch(base + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+        body: JSON.stringify({ username: 'Todd', password: PW.reset }),
+      });
+      const cookie = (typeof login.headers.getSetCookie === 'function' ? login.headers.getSetCookie() : []).map(part => part.split(';')[0]).join('; ');
+      return { base, cookie, readLog: () => sideLog };
+    }
+    async function emailSendFailure(base, cookie, username) {
+      const created = await client.query(
+        `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+        [username, bcrypt.hashSync(PW.invite, 10), 'Mail Fallback'],
+      );
+      const userId = Number(created.rows[0].id);
+      const first = await jpost(`/api/admin/users/${userId}/reset-link`, {}, { cookie: toddCookie });
+      const oldToken = String(first.data.link || '').split('/').pop();
+      track(first.data.link || '');
+      track(oldToken);
+      await client.query(`UPDATE users SET email = $1 WHERE id = $2`, [`${username}@example.com`, userId]);
+      const res = await fetch(base + `/api/admin/users/${userId}/reset-link`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, 'x-forwarded-for': nextIp() },
+        body: '{}',
+      });
+      const body = await res.json();
+      const newToken = String(body.link || '').split('/').pop();
+      track(body.link || '');
+      track(newToken);
+      const unused = await client.query(
+        `SELECT token_hash, EXTRACT(EPOCH FROM (expires_at - (NOW() AT TIME ZONE 'UTC'))) AS seconds
+         FROM password_resets WHERE user_id = $1 AND used_at IS NULL`,
+        [userId],
+      );
+      const oldGet = await jget(`/api/auth/reset-password/${encodeURIComponent(oldToken)}`);
+      const newGet = await jget(`/api/auth/reset-password/${encodeURIComponent(newToken)}`);
+      const newUse = await jpost('/api/auth/reset-password', { token: newToken, password: PW.third });
+      const oldUse = await jpost('/api/auth/reset-password', { token: oldToken, password: PW.adaNext });
+      const newRow = unused.rows.find(row => row.token_hash === sha(newToken || 'missing'));
+      const oldRow = unused.rows.find(row => row.token_hash === sha(oldToken || 'missing'));
+      return { res, body, oldToken, newToken, unused, oldGet, newGet, newUse, oldUse, newRow, oldRow };
+    }
+
+    const failSide = await bootSide(3193, { OUTBOUND_FAIL: '1' });
+    const failed = await emailSendFailure(failSide.base, failSide.cookie, 'failmail');
+    check(
+      'a failed reset email falls back to a copy link',
+      failed.res.status === 200 && failed.body.sent === false && failed.body.reason === 'Email failed'
+        && failed.newToken.length === 43
+        && failed.unused.rows.length === 2
+        && failed.oldRow && failed.newRow
+        && Math.abs(Number(failed.newRow.seconds) - 24 * 60 * 60) <= 90
+        && failed.oldGet.status === 200 && failed.newGet.status === 200
+        && failed.newUse.status === 200 && failed.oldUse.status === 200
+        && !log.includes(failed.newToken) && !log.includes(failed.oldToken) && !failSide.readLog().includes(failed.newToken),
+    );
+    const hangSide = await bootSide(3194, { OUTBOUND_DELAY_MS: '4000' });
+    const hungStarted = Date.now();
+    const hung = await emailSendFailure(hangSide.base, hangSide.cookie, 'hangmail');
+    const hungMs = Date.now() - hungStarted;
+    check(
+      'a timed out reset email falls back to a copy link',
+      hung.res.status === 200 && hung.body.sent === false && hung.body.reason === 'Email failed'
+        && hungMs >= 2500 && hungMs < 8000
+        && hung.newToken.length === 43
+        && hung.unused.rows.length === 2
+        && hung.oldRow && hung.newRow
+        && Math.abs(Number(hung.newRow.seconds) - 24 * 60 * 60) <= 90
+        && hung.oldGet.status === 200 && hung.newGet.status === 200
+        && hung.newUse.status === 200 && hung.oldUse.status === 200
+        && !log.includes(hung.newToken) && !hangSide.readLog().includes(hung.newToken),
+    );
+
     const patBefore = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = $1`, [patId])).rows[0].n);
     await client.query(`UPDATE users SET email = 'pat@example.com' WHERE id = $1`, [patId]);
     const patReset = await jpost(`/api/admin/users/${patId}/reset-link`, {}, { cookie: toddCookie });
@@ -798,12 +886,34 @@ async function main() {
       jpatch(`/api/admin/users/${raceIds[n % 2]}`, { email: raceEmail }, { cookie: toddCookie, ip: `198.51.100.${160 + n}` })
     )));
     const raceWins = raceResults.filter(result => result.status === 200);
+    const raceWinIds = new Set(raceWins.map(result => result.data && result.data.user && result.data.user.id));
     const raceOwners = await client.query(`SELECT id FROM users WHERE lower(email) = $1`, [raceEmail]);
     check(
-      'concurrent email updates allow one winner',
-      raceWins.length === 1
-        && raceResults.filter(result => result.status === 409).length === 9
-        && raceOwners.rows.length === 1,
+      'concurrent email updates leave the address on one user',
+      raceWinIds.size === 1
+        && raceOwners.rows.length === 1
+        && raceWinIds.has(Number(raceOwners.rows[0].id))
+        && raceResults.every(result => result.status === 200 || result.status === 409)
+        && raceResults.some(result => result.status === 409),
+    );
+    const claimIds = [];
+    for (let n = 0; n < 10; n += 1) {
+      const row = await client.query(
+        `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+        [`claim${n}`, bcrypt.hashSync(PW.ada, 10), 'Claim User'],
+      );
+      claimIds.push(Number(row.rows[0].id));
+    }
+    const claimEmail = 'claim.user@example.com';
+    const claimResults = await Promise.all(claimIds.map((id, n) => (
+      jpatch(`/api/admin/users/${id}`, { email: claimEmail }, { cookie: toddCookie, ip: `198.51.100.${170 + n}` })
+    )));
+    const claimOwners = await client.query(`SELECT id FROM users WHERE lower(email) = $1`, [claimEmail]);
+    check(
+      'ten concurrent claims of one email allow one success',
+      claimResults.filter(result => result.status === 200).length === 1
+        && claimResults.filter(result => result.status === 409 && result.data.error === 'That email is already in use').length === 9
+        && claimOwners.rows.length === 1,
     );
 
     const dupProbe = 'dupidx-probe@example.com';
@@ -1061,6 +1171,9 @@ async function main() {
     try { await client.end(); } catch { /* not connected */ }
     if (srv && srv.pid) srv.kill();
     if (srv2 && srv2.pid) srv2.kill();
+    for (const child of sideServers) {
+      if (child && child.pid) child.kill();
+    }
     console.log(`\n${pass} passed, ${fail} failed`);
     if (fail && log) console.log('--- server log ---\n' + redact(log));
     process.exit(fail ? 1 : 0);
