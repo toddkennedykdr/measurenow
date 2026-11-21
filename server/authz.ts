@@ -29,6 +29,8 @@ export function hashInviteToken(token: string): string {
 }
 
 export function inviteTokenProblem(token: unknown): string | null {
+  const controls = controlCharProblem(token);
+  if (controls) return controls;
   if (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token)) return 'Invite link is invalid';
   return null;
 }
@@ -41,7 +43,19 @@ export function tokenMatches(storedHash: string, token: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/** C0 and C1 controls, including NUL. None of these belong in credentials or invite fields. */
+const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/;
+export const CONTROL_CHAR_ERROR = 'Invalid characters';
+
+export function controlCharProblem(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  if (CONTROL_CHARS.test(value)) return CONTROL_CHAR_ERROR;
+  return null;
+}
+
 export function passwordProblem(password: unknown): string | null {
+  const controls = controlCharProblem(password);
+  if (controls) return controls;
   if (typeof password !== 'string' || password.length < 12) return 'Password must be at least 12 characters';
   if (password.length > 200) return 'Password is too long';
   return null;
@@ -66,6 +80,8 @@ export function hashResetToken(token: string): string {
 }
 
 export function resetTokenProblem(token: unknown): string | null {
+  const controls = controlCharProblem(token);
+  if (controls) return controls;
   if (typeof token !== 'string' || !RESET_TOKEN_RE.test(token)) return RESET_LINK_ERROR;
   return null;
 }
@@ -128,8 +144,7 @@ export function decideInviteAccept(input: {
 }
 
 const USERNAME_RE = /^[A-Za-z0-9._-]{2,40}$/;
-const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}$/;
-const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/;
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}$/;;
 
 /** Path ids are decimal integers only. `14abc` and `1e3` are not ids. */
 export function strictUserId(raw: unknown): number | null {
@@ -140,6 +155,8 @@ export function strictUserId(raw: unknown): number | null {
 }
 
 export function usernameProblem(username: unknown): string | null {
+  const controls = controlCharProblem(username);
+  if (controls) return controls;
   if (typeof username !== 'string' || !USERNAME_RE.test(username.trim())) {
     return 'Username must be 2–40 letters, numbers, dots, dashes, or underscores';
   }
@@ -147,11 +164,12 @@ export function usernameProblem(username: unknown): string | null {
 }
 
 export function emailProblem(email: unknown): string | null {
+  const controls = controlCharProblem(email);
+  if (controls) return controls;
   if (email == null || email === '') return null;
   if (typeof email !== 'string') return 'Enter a valid email or leave it blank';
   const trimmed = email.trim();
   if (!trimmed) return null;
-  if (CONTROL_CHARS.test(trimmed)) return 'Invalid characters';
   if (trimmed.length > 120 || /[\s,<>]/.test(trimmed) || !EMAIL_RE.test(trimmed)) return 'Enter a valid email or leave it blank';
   return null;
 }
@@ -168,6 +186,8 @@ export function normalizeUserEmail(email: unknown): { ok: true; email: string | 
 }
 
 export function nameProblem(name: unknown): string | null {
+  const controls = controlCharProblem(name);
+  if (controls) return controls;
   if (typeof name !== 'string' || name.trim().length < 1 || name.trim().length > 80) return 'Name is required';
   return null;
 }

@@ -2,9 +2,11 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { db, pool, schema } from '../db';
-import { loadSessionUser, perIpLimit, requireAuth } from '../middleware/security';
+import { asyncRoute, loadSessionUser, perIpLimit, requireAuth } from '../middleware/security';
 import { destroySessionsForUser } from '../sessionStore';
 import {
+  CONTROL_CHAR_ERROR,
+  controlCharProblem,
   decideInviteAccept,
   decidePasswordReset,
   hashInviteToken,
@@ -30,8 +32,11 @@ import {
 
 export const authRouter = Router();
 
-authRouter.post('/login', async (req: Request, res: Response) => {
+authRouter.post('/login', asyncRoute(async (req: Request, res: Response) => {
   const { username, password } = req.body;
+  if (controlCharProblem(username) || controlCharProblem(password)) {
+    return res.status(400).json({ error: CONTROL_CHAR_ERROR });
+  }
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
 
   const rows = await db.select().from(schema.users).where(eq(schema.users.username, username)).limit(1);
@@ -47,14 +52,16 @@ authRouter.post('/login', async (req: Request, res: Response) => {
   (req.session as any).userId = user.id;
   (req.session as any).userName = user.name;
   return res.json({ id: user.id, name: user.name, username: user.username, role: user.role === 'admin' ? 'admin' : 'user' });
-});
+}));
 
-authRouter.post('/logout', (req: Request, res: Response) => {
-  req.session.destroy(() => {});
-  return res.json({ ok: true });
-});
+authRouter.post('/logout', asyncRoute((req: Request, res: Response, next) => {
+  req.session.destroy((err) => {
+    if (err) return next(err);
+    return res.json({ ok: true });
+  });
+}));
 
-authRouter.get('/me', async (req: Request, res: Response) => {
+authRouter.get('/me', asyncRoute(async (req: Request, res: Response) => {
   const userId = (req.session as any)?.userId;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const user = await loadSessionUser(userId);
@@ -63,10 +70,10 @@ authRouter.get('/me', async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Not authenticated' });
   }
   return res.json({ id: user.id, name: user.name, username: user.username, role: user.role === 'admin' ? 'admin' : 'user' });
-});
+}));
 
 // Invitee sets their own password. Does not change an existing account.
-authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), async (req: Request, res: Response) => {
+authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), asyncRoute(async (req: Request, res: Response) => {
   const tokenError = inviteTokenProblem(req.body?.token);
   if (tokenError) return res.status(400).json({ error: tokenError });
   const pwError = passwordProblem(req.body?.password);
@@ -137,7 +144,7 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
   } finally {
     client.release();
   }
-});
+}));
 
 const resetLimit = perIpLimit('reset-password', 15 * 60_000, 20);
 
@@ -149,7 +156,7 @@ function resetRowGate(row: { used: boolean; expired: boolean; user_disabled: boo
   });
 }
 
-authRouter.get('/reset-password/:token', resetLimit, async (req: Request, res: Response) => {
+authRouter.get('/reset-password/:token', resetLimit, asyncRoute(async (req: Request, res: Response) => {
   const tokenError = resetTokenProblem(req.params.token);
   if (tokenError) return res.status(400).json({ error: tokenError });
   try {
@@ -169,10 +176,10 @@ authRouter.get('/reset-password/:token', resetLimit, async (req: Request, res: R
     console.error('reset-password check failed');
     return res.status(500).json({ error: 'Could not check the reset link' });
   }
-});
+}));
 
 // One-time link. Refusals stay generic so a caller cannot tell unknown, used, expired, and disabled apart.
-authRouter.post('/reset-password', resetLimit, async (req: Request, res: Response) => {
+authRouter.post('/reset-password', resetLimit, asyncRoute(async (req: Request, res: Response) => {
   const tokenError = resetTokenProblem(req.body?.token);
   if (tokenError) return res.status(400).json({ error: tokenError });
   const pwError = passwordProblem(req.body?.password);
@@ -235,7 +242,7 @@ authRouter.post('/reset-password', resetLimit, async (req: Request, res: Respons
   } finally {
     client.release();
   }
-});
+}));
 
 const FORGOT_OK = { ok: true };
 const FORGOT_LIMIT = { error: 'Too many reset requests. Please wait and try again.' };
@@ -289,7 +296,7 @@ async function queueForgotSend(user: { id: number; disabled: boolean; email: str
 }
 
 // Always the same 200. A logged-in cookie does not skip the limiter.
-authRouter.post('/forgot-password', async (req: Request, res: Response) => {
+authRouter.post('/forgot-password', asyncRoute(async (req: Request, res: Response) => {
   const started = Date.now();
   const waitMs = forgotWaitMs();
   const parsed = forgotAccountKey(req.body?.identifier);
@@ -311,12 +318,13 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
   }
   await waitForForgot(started, waitMs);
   return res.json(FORGOT_OK);
-});
+}));
 
-authRouter.post('/change-password', requireAuth, async (req: Request, res: Response) => {
+authRouter.post('/change-password', requireAuth, asyncRoute(async (req: Request, res: Response) => {
   const pwError = passwordProblem(req.body?.password);
   if (pwError) return res.status(400).json({ error: pwError });
   const currentPassword = req.body?.currentPassword;
+  if (controlCharProblem(currentPassword)) return res.status(400).json({ error: CONTROL_CHAR_ERROR });
   if (typeof currentPassword !== 'string' || currentPassword.length === 0) {
     return res.status(400).json({ error: 'Current password is required' });
   }
@@ -349,4 +357,12 @@ authRouter.post('/change-password', requireAuth, async (req: Request, res: Respo
     console.error('change-password failed');
     return res.status(500).json({ error: 'Could not change the password' });
   }
-});
+}));
+
+if (process.env.ROUTE_FAULT === '1') {
+  authRouter.get('/__fault', asyncRoute(async () => {
+    const err = new Error('forced');
+    (err as NodeJS.ErrnoException).code = 'EFAULT';
+    throw err;
+  }));
+}

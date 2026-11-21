@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { eq } from 'drizzle-orm';
 import { db, pool, schema } from '../db';
-import { adminRateLimit, requireAdmin, SessionUser } from '../middleware/security';
+import { adminRateLimit, asyncRoute, requireAdmin, SessionUser } from '../middleware/security';
 import { auditAdmin } from '../audit';
 import { destroySessionsForUser } from '../sessionStore';
 import {
@@ -47,12 +47,12 @@ const userColumns = {
   disabled: schema.users.disabled,
 };
 
-adminRouter.get('/users', async (_req: Request, res: Response) => {
+adminRouter.get('/users', asyncRoute(async (_req: Request, res: Response) => {
   const rows = await db.select(userColumns).from(schema.users).orderBy(schema.users.name);
   return res.json({ users: rows.map(row => publicUser(row, { includeEmail: true })) });
-});
+}));
 
-adminRouter.patch('/users/:id', async (req: Request, res: Response) => {
+adminRouter.patch('/users/:id', asyncRoute(async (req: Request, res: Response) => {
   const id = strictUserId(req.params.id);
   if (id == null) return res.status(400).json({ error: 'Invalid user' });
   const body = req.body ?? {};
@@ -109,7 +109,7 @@ adminRouter.patch('/users/:id', async (req: Request, res: Response) => {
   if (touchesDisabled) auditAdmin(me.id, id, disabled ? 'disable' : 'enable');
   if (touchesEmail && (target.email ?? null) !== email) auditAdmin(me.id, id, 'email-change');
   return res.json({ user: publicUser({ ...target, ...patch }, { includeEmail: true }) });
-});
+}));
 
 const resetLinkLimit = rateLimit({
   windowMs: 15 * 60_000,
@@ -120,7 +120,7 @@ const resetLinkLimit = rateLimit({
   message: { error: 'Too many reset links. Please try again later.' },
 });
 
-adminRouter.post('/users/:id/reset-link', resetLinkLimit, async (req: Request, res: Response) => {
+adminRouter.post('/users/:id/reset-link', resetLinkLimit, asyncRoute(async (req: Request, res: Response) => {
   const id = strictUserId(req.params.id);
   if (id == null) return res.status(400).json({ error: 'Invalid user' });
   const me = current(req);
@@ -163,9 +163,9 @@ adminRouter.post('/users/:id/reset-link', resetLinkLimit, async (req: Request, r
   }
   auditAdmin(me.id, id, 'reset-link');
   return res.json({ sent: false, reason: resetLinkFallbackReason(address.length > 0), link });
-});
+}));
 
-adminRouter.get('/invites', async (_req: Request, res: Response) => {
+adminRouter.get('/invites', asyncRoute(async (_req: Request, res: Response) => {
   const result = await pool.query(
     `SELECT id, name, username, email, created_at, expires_at
      FROM invites
@@ -182,9 +182,9 @@ adminRouter.get('/invites', async (_req: Request, res: Response) => {
       expiresAt: r.expires_at,
     })),
   });
-});
+}));
 
-adminRouter.post('/invites', async (req: Request, res: Response) => {
+adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
   const nameErr = nameProblem(req.body?.name);
   if (nameErr) return res.status(400).json({ error: nameErr });
   const userErr = usernameProblem(req.body?.username);
@@ -224,9 +224,9 @@ adminRouter.post('/invites', async (req: Request, res: Response) => {
     invite: { id: inserted[0].id, name, username, email, expiresAt: expiresAt.toISOString() },
     inviteUrl,
   });
-});
+}));
 
-adminRouter.post('/invites/:id/revoke', async (req: Request, res: Response) => {
+adminRouter.post('/invites/:id/revoke', asyncRoute(async (req: Request, res: Response) => {
   const id = strictUserId(req.params.id);
   if (id == null) return res.status(400).json({ error: 'Invalid invite' });
   const result = await pool.query(
@@ -242,9 +242,9 @@ adminRouter.post('/invites/:id/revoke', async (req: Request, res: Response) => {
     return res.status(409).json({ error: 'This invite is already revoked' });
   }
   return res.json({ ok: true });
-});
+}));
 
-adminRouter.get('/orders', async (req: Request, res: Response) => {
+adminRouter.get('/orders', asyncRoute(async (req: Request, res: Response) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
   const userIdRaw = typeof req.query.userId === 'string' ? req.query.userId : '';
   let userId: number | null = null;
@@ -290,4 +290,4 @@ adminRouter.get('/orders', async (req: Request, res: Response) => {
       analysis: r.analysis,
     })),
   });
-});
+}));

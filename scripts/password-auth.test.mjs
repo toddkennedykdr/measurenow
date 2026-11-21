@@ -84,6 +84,7 @@ function childEnv(extra = {}) {
     SEED_ADMIN_PASSWORD: '',
     RESEND_API_KEY: 'stub-not-real',
     OUTBOUND_LOG: outboundPath,
+    ROUTE_FAULT: '1',
     TZ: 'UTC',
     ...extra,
   };
@@ -821,6 +822,30 @@ async function main() {
     const delayMail = fs.readFileSync(delayLog, 'utf8');
     if (srv3.pid) srv3.kill();
     check('slow reset mail does not hold the forgot response', delayed.status === 200 && JSON.stringify(delayBody) === '{"ok":true}' && delayMs < 1800 && delayMail.includes('sess.user@example.com'));
+
+    const probe = 'probeNUL9f3a';
+    const nulUser = await jpost('/api/auth/login', { username: `Todd\u0000${probe}`, password: 'x' });
+    const nulPass = await jpost('/api/auth/login', { username: 'Todd', password: `x\u0000${probe}` });
+    const stillUp = await jget('/api/auth/me');
+    check('nul username is rejected', nulUser.status === 400 && nulUser.data.error === 'Invalid characters' && !JSON.stringify(nulUser.data).includes(probe));
+    check('nul password is rejected', nulPass.status === 400 && nulPass.data.error === 'Invalid characters');
+    check('server stays up after a nul login', stillUp.status === 401);
+
+    const inviteNul = await jpost('/api/admin/invites', {
+      name: `Ada\u0000${probe}`,
+      username: 'newname',
+      email: `a\u0000@b.co`,
+    }, { cookie: toddCookie });
+    const acceptNul = await jpost('/api/auth/accept-invite', { token: `${probe}\u0000`, password: `long-enough-pw\u0000${probe}` });
+    check('invite with a nul is rejected', inviteNul.status === 400 && inviteNul.data.error === 'Invalid characters');
+    check('invite accept with a nul is rejected', acceptNul.status === 400 && acceptNul.data.error === 'Invalid characters');
+
+    const fault = await jget(`/api/auth/__fault?marker=${probe}`);
+    const afterFault = await jget('/api/auth/me');
+    await new Promise(r => setTimeout(r, 50));
+    check('forced route rejection is a generic 500', fault.status === 500 && fault.data.error === 'Something went wrong' && !JSON.stringify(fault.data).includes(probe));
+    check('server stays up after a forced rejection', afterFault.status === 401);
+    check('logs omit the posted fields', !log.includes(probe) && log.includes('EFAULT') && !log.includes('forced'));
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));
