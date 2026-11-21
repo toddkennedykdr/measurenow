@@ -1,14 +1,30 @@
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { eq } from 'drizzle-orm';
-import { db, pool, schema } from '../db';
+import { db, pool, schema, uniqueViolation, USER_EMAIL_UNIQUE_INDEX } from '../db';
 import { PROD_ORIGIN, adminRateLimit, asyncRoute, requireAdmin, SessionUser } from '../middleware/security';
+import { auditAdmin } from '../audit';
+import { destroySessionsForUser } from '../sessionStore';
+import {
+  issuePasswordReset,
+  passwordResetUrl,
+  RESET_COPY_HOURS,
+  RESET_EMAIL_HOURS,
+  resetEmailConfigured,
+  resetLinkFallbackReason,
+  retireOlderPasswordResets,
+  sendPasswordResetEmail,
+  widenPasswordReset,
+} from '../passwordReset';
 import {
   INVITE_TTL_MS,
   emailProblem,
   hashInviteToken,
   nameProblem,
   newInviteToken,
+  normalizeUserEmail,
   publicUser,
+  strictUserId,
   summarizeOrder,
   usernameProblem,
 } from '../authz';
@@ -22,40 +38,53 @@ function current(req: Request): SessionUser {
   return (req as any).currentUser as SessionUser;
 }
 
+const userColumns = {
+  id: schema.users.id,
+  name: schema.users.name,
+  username: schema.users.username,
+  role: schema.users.role,
+  email: schema.users.email,
+  createdAt: schema.users.createdAt,
+  lastLoginAt: schema.users.lastLoginAt,
+  disabled: schema.users.disabled,
+};
+
 adminRouter.get('/users', asyncRoute(async (_req: Request, res: Response) => {
-  const rows = await db.select({
-    id: schema.users.id,
-    name: schema.users.name,
-    username: schema.users.username,
-    role: schema.users.role,
-    createdAt: schema.users.createdAt,
-    lastLoginAt: schema.users.lastLoginAt,
-    disabled: schema.users.disabled,
-  }).from(schema.users).orderBy(schema.users.name);
-  return res.json({ users: rows.map(publicUser) });
+  const rows = await db.select(userColumns).from(schema.users).orderBy(schema.users.name);
+  return res.json({ users: rows.map(row => publicUser(row, { includeEmail: true })) });
 }));
 
 adminRouter.patch('/users/:id', asyncRoute(async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) return res.status(404).json({ error: 'User not found' });
-  if (typeof req.body?.disabled !== 'boolean') return res.status(400).json({ error: 'disabled must be true or false' });
-  const disabled = req.body.disabled as boolean;
+  const id = strictUserId(req.params.id);
+  if (id == null) return res.status(400).json({ error: 'Invalid user' });
+  const body = req.body ?? {};
+  const touchesDisabled = Object.prototype.hasOwnProperty.call(body, 'disabled');
+  const touchesEmail = Object.prototype.hasOwnProperty.call(body, 'email');
+  if (!touchesDisabled && !touchesEmail) return res.status(400).json({ error: 'Nothing to update' });
+  if (touchesDisabled && typeof body.disabled !== 'boolean') return res.status(400).json({ error: 'disabled must be true or false' });
+  let email: string | null = null;
+  if (touchesEmail) {
+    const normalized = normalizeUserEmail(body.email);
+    if (!normalized.ok) return res.status(400).json({ error: normalized.error });
+    email = normalized.email;
+  }
+  const disabled = touchesDisabled ? body.disabled as boolean : false;
   const me = current(req);
-  if (disabled && id === me.id) return res.status(400).json({ error: 'You cannot disable your own account' });
+  if (touchesDisabled && disabled && id === me.id) return res.status(400).json({ error: 'You cannot disable your own account' });
 
-  const rows = await db.select({
-    id: schema.users.id,
-    name: schema.users.name,
-    username: schema.users.username,
-    role: schema.users.role,
-    createdAt: schema.users.createdAt,
-    lastLoginAt: schema.users.lastLoginAt,
-    disabled: schema.users.disabled,
-  }).from(schema.users).where(eq(schema.users.id, id)).limit(1);
+  const rows = await db.select(userColumns).from(schema.users).where(eq(schema.users.id, id)).limit(1);
   const target = rows[0];
   if (!target) return res.status(404).json({ error: 'User not found' });
 
-  if (disabled && target.role === 'admin') {
+  if (touchesEmail && email) {
+    const dup = await pool.query(
+      `SELECT id FROM users WHERE lower(email) = $1 AND id <> $2 LIMIT 1`,
+      [email, id],
+    );
+    if (dup.rows[0]) return res.status(409).json({ error: 'That email is already in use' });
+  }
+
+  if (touchesDisabled && disabled && target.role === 'admin') {
     const others = await pool.query(
       `SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin' AND disabled = false AND id <> $1`,
       [id],
@@ -63,8 +92,97 @@ adminRouter.patch('/users/:id', asyncRoute(async (req: Request, res: Response) =
     if ((others.rows[0]?.n ?? 0) < 1) return res.status(400).json({ error: 'Cannot disable the last admin' });
   }
 
-  await db.update(schema.users).set({ disabled }).where(eq(schema.users.id, id));
-  return res.json({ user: publicUser({ ...target, disabled }) });
+  const patch: { disabled?: boolean; email?: string | null } = {};
+  if (touchesDisabled) patch.disabled = disabled;
+  if (touchesEmail) patch.email = email;
+  try {
+    await db.update(schema.users).set(patch).where(eq(schema.users.id, id));
+  } catch (err) {
+    if (uniqueViolation(err) != null) return res.status(409).json({ error: 'That email is already in use' });
+    throw err;
+  }
+  if (touchesDisabled && disabled) {
+    await pool.query(
+      `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE user_id = $1 AND used_at IS NULL`,
+      [id],
+    );
+    try {
+      await destroySessionsForUser(id);
+    } catch {
+      console.error('session revoke failed');
+      return res.status(500).json({ error: 'Could not update user' });
+    }
+  }
+  if (touchesDisabled) auditAdmin(me.id, id, disabled ? 'disable' : 'enable');
+  if (touchesEmail && (target.email ?? null) !== email) auditAdmin(me.id, id, 'email-change');
+  return res.json({ user: publicUser({ ...target, ...patch }, { includeEmail: true }) });
+}));
+
+const resetLinkLimit = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `reset-link:${(req as any).currentUser?.id ?? 'anon'}`,
+  message: { error: 'Too many reset links. Please try again later.' },
+});
+
+adminRouter.post('/users/:id/reset-link', resetLinkLimit, asyncRoute(async (req: Request, res: Response) => {
+  const id = strictUserId(req.params.id);
+  if (id == null) return res.status(400).json({ error: 'Invalid user' });
+  const me = current(req);
+  const rows = await db.select(userColumns).from(schema.users).where(eq(schema.users.id, id)).limit(1);
+  const target = rows[0];
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (target.disabled) return res.status(400).json({ error: 'That account is disabled.' });
+
+  const address = typeof target.email === 'string' ? target.email.trim() : '';
+  const emailIt = address.length > 0 && resetEmailConfigured();
+  const hours = emailIt ? RESET_EMAIL_HOURS : RESET_COPY_HOURS;
+  const client = await pool.connect();
+  let link = '';
+  let resetToken = '';
+  try {
+    await client.query('BEGIN');
+    const issued = await issuePasswordReset(client, id, hours, { keepOlder: emailIt });
+    if (!issued.ok) {
+      await client.query('ROLLBACK');
+      if (issued.reason === 'disabled') return res.status(400).json({ error: 'That account is disabled.' });
+      return res.status(404).json({ error: 'User not found' });
+    }
+    resetToken = issued.token;
+    link = passwordResetUrl(issued.token);
+    await client.query('COMMIT');
+  } catch {
+    try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+    console.error('reset link failed');
+    return res.status(500).json({ error: 'Could not create the reset link' });
+  } finally {
+    client.release();
+  }
+  if (emailIt) {
+    try {
+      await sendPasswordResetEmail(address, link, hours);
+    } catch {
+      console.error('reset email failed');
+      try {
+        await widenPasswordReset(resetToken, RESET_COPY_HOURS);
+      } catch {
+        console.error('reset email failed');
+      }
+      auditAdmin(me.id, id, 'reset-link');
+      return res.json({ sent: false, reason: 'Email failed', link });
+    }
+    try {
+      await retireOlderPasswordResets(id, resetToken);
+    } catch {
+      console.error('reset email failed');
+    }
+    auditAdmin(me.id, id, 'reset-link');
+    return res.json({ sent: true });
+  }
+  auditAdmin(me.id, id, 'reset-link');
+  return res.json({ sent: false, reason: resetLinkFallbackReason(address.length > 0), link });
 }));
 
 adminRouter.get('/invites', asyncRoute(async (_req: Request, res: Response) => {
@@ -96,7 +214,14 @@ adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
 
   const name = String(req.body.name).trim();
   const username = String(req.body.username).trim();
-  const email = req.body?.email ? String(req.body.email).trim() : null;
+  const normalizedEmail = normalizeUserEmail(req.body?.email);
+  if (!normalizedEmail.ok) return res.status(400).json({ error: normalizedEmail.error });
+  const email = normalizedEmail.email;
+
+  if (email) {
+    const dupEmail = await pool.query(`SELECT id FROM users WHERE lower(email) = $1 LIMIT 1`, [email]);
+    if (dupEmail.rows[0]) return res.status(409).json({ error: 'That email is already in use' });
+  }
 
   const existing = await pool.query(`SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1`, [username]);
   if (existing.rows[0]) {
@@ -112,14 +237,22 @@ adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
 
   const token = newInviteToken();
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
-  const inserted = await db.insert(schema.invites).values({
-    name,
-    username,
-    email,
-    tokenHash: hashInviteToken(token),
-    createdBy: current(req).id,
-    expiresAt,
-  }).returning({ id: schema.invites.id });
+  let inserted: { id: number }[];
+  try {
+    inserted = await db.insert(schema.invites).values({
+      name,
+      username,
+      email,
+      tokenHash: hashInviteToken(token),
+      createdBy: current(req).id,
+      expiresAt,
+    }).returning({ id: schema.invites.id });
+  } catch (err) {
+    if (uniqueViolation(err) === USER_EMAIL_UNIQUE_INDEX) {
+      return res.status(409).json({ error: 'That email is already in use' });
+    }
+    throw err;
+  }
 
   const inviteUrl = `${PROD_ORIGIN}/invite/${token}`;
   return res.json({
@@ -129,8 +262,8 @@ adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
 }));
 
 adminRouter.post('/invites/:id/revoke', asyncRoute(async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) return res.status(404).json({ error: 'Invite not found' });
+  const id = strictUserId(req.params.id);
+  if (id == null) return res.status(400).json({ error: 'Invalid invite' });
   const result = await pool.query(
     `UPDATE invites SET revoked_at = NOW()
      WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL

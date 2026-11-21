@@ -3,12 +3,11 @@ import path from 'path';
 import dotenv from 'dotenv';
 import type { Pool } from 'pg';
 import {
-  hashResetToken,
   mintResetUserAllowed,
-  newResetToken,
   parseResetHours,
   RESET_DEFAULT_HOURS,
 } from '../server/authz';
+import { issuePasswordReset, passwordResetUrl } from '../server/passwordReset';
 
 const DEFAULT_OUT = '/workspace/private/mn-reset-link.txt';
 // Same public origin already used by the app. Do not add a deployment env var.
@@ -165,7 +164,7 @@ async function createReset(pool: Pool, args: OkArgs): Promise<{ ok: true; outPat
   try {
     await client.query('BEGIN');
     const found = await client.query(
-      `SELECT id, disabled FROM users WHERE username = $1`,
+      `SELECT id FROM users WHERE username = $1`,
       [args.username],
     );
     const user = found.rows[0];
@@ -173,30 +172,13 @@ async function createReset(pool: Pool, args: OkArgs): Promise<{ ok: true; outPat
       await client.query('ROLLBACK');
       return { ok: false, message: 'No account found for that username.' };
     }
-    if (user.disabled) {
+    const issued = await issuePasswordReset(client, Number(user.id), args.hours);
+    if (!issued.ok) {
       await client.query('ROLLBACK');
-      return { ok: false, message: 'That account is disabled.' };
-    }
-    await client.query(
-      `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE user_id = $1 AND used_at IS NULL`,
-      [user.id],
-    );
-    const token = newResetToken();
-    const inserted = await client.query(
-      `INSERT INTO password_resets (user_id, token_hash, expires_at)
-       VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC') + make_interval(hours => trunc($3::numeric)::int, secs => (($3::numeric - trunc($3::numeric)) * 3600)::double precision))
-       RETURNING
-         to_char(expires_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_utc,
-         to_char((expires_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York', 'YYYY-MM-DD HH24:MI:SS') AS expires_et`,
-      [user.id, hashResetToken(token), args.hours],
-    );
-    const expiresUtc = inserted.rows[0]?.expires_utc;
-    const expiresEt = inserted.rows[0]?.expires_et;
-    if (typeof expiresUtc !== 'string' || typeof expiresEt !== 'string') {
-      await client.query('ROLLBACK');
+      if (issued.reason === 'disabled') return { ok: false, message: 'That account is disabled.' };
       return { ok: false, message: 'Could not create the reset link.' };
     }
-    const link = `${args.baseUrl}/reset/${token}`;
+    const link = passwordResetUrl(issued.token, args.baseUrl);
     fs.writeFileSync(fd, `${link}\n`);
     fs.fsyncSync(fd);
     fs.closeSync(fd);
@@ -204,7 +186,7 @@ async function createReset(pool: Pool, args: OkArgs): Promise<{ ok: true; outPat
     fs.chmodSync(prepared.resolved, 0o600);
     await client.query('COMMIT');
     committed = true;
-    return { ok: true, outPath: prepared.resolved, expiresEt, expiresUtc };
+    return { ok: true, outPath: prepared.resolved, expiresEt: issued.expiresEt, expiresUtc: issued.expiresUtc };
   } catch {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }
     return { ok: false, message: 'Could not create the reset link.' };

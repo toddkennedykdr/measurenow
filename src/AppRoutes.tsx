@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage';
 import App from './App';
 import InspectPage from './pages/InspectPage';
 import LoginPage from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ReportsPage from './pages/ReportsPage';
 import ReportDetailPage from './pages/ReportDetailPage';
 import UsersPage from './pages/admin/UsersPage';
@@ -37,6 +38,7 @@ export function AppRoutes() {
       <Route path="/quote" element={<App />} />
       <Route path="/inspect" element={<RequireAuth><InspectPage /></RequireAuth>} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reports" element={<ReportsPage />} />
       <Route path="/reports/:id" element={<ReportDetailPage />} />
       <Route path="/invite/:token" element={<InviteAcceptPage />} />

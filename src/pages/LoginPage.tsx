@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { BrandLogo } from '../components/BrandLogo';
 
@@ -44,6 +44,7 @@ export default function LoginPage() {
         <button type="submit" className="btn btn--primary" disabled={loading}>
           {loading ? 'Signing in...' : 'Sign In'}
         </button>
+        <p className="login-forgot"><Link to="/forgot-password">Forgot password?</Link></p>
       </form>
     </div>
   );

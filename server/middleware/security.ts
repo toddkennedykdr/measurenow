@@ -2,7 +2,7 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db';
-import { accessDecision } from '../authz';
+import { accessDecision, sessionIsStaff } from '../authz';
 
 export type SessionUser = {
   id: number;
@@ -19,9 +19,16 @@ export function asyncRoute(fn: (req: Request, res: Response, next: NextFunction)
   };
 }
 
-/** True when the request carries a logged-in staff session. */
-export function isStaff(req: Request): boolean {
-  return Boolean((req.session as any)?.userId);
+/** True only when the session user still exists and is not disabled. */
+export async function isStaff(req: Request): Promise<boolean> {
+  const userId = sessionUserId(req);
+  if (!userId) return false;
+  try {
+    const user = await loadSessionUser(userId);
+    return sessionIsStaff(user);
+  } catch {
+    return false;
+  }
 }
 
 export async function loadSessionUser(userId: number): Promise<SessionUser | null> {
@@ -186,18 +193,23 @@ function bump(name: string, limit: number): boolean {
 export function dailyCap(name: string, publicMax: number, staffMax: number): RequestHandler {
   const envName = name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
   return (req, res, next) => {
-    const staff = isStaff(req);
-    const limit = staff
-      ? envInt(`CAP_${envName}_STAFF`, staffMax)
-      : envInt(`CAP_${envName}_PUBLIC`, publicMax);
-    const key = `${name}:${staff ? 'staff' : 'public'}`;
-    if (!bump(key, limit)) {
-      console.warn(`[daily-cap] ${key} reached ${limit} for ${etDateKey()}`);
-      return res.status(429).json({
-        error: "We've hit today's limit for instant quotes. Please call us at (919) 977-4074 for a free estimate, or try again tomorrow.",
-      });
-    }
-    next();
+    isStaff(req).then((staff) => {
+      const limit = staff
+        ? envInt(`CAP_${envName}_STAFF`, staffMax)
+        : envInt(`CAP_${envName}_PUBLIC`, publicMax);
+      const key = `${name}:${staff ? 'staff' : 'public'}`;
+      if (!bump(key, limit)) {
+        console.warn(`[daily-cap] ${key} reached ${limit} for ${etDateKey()}`);
+        res.status(429).json({
+          error: "We've hit today's limit for instant quotes. Please call us at (919) 977-4074 for a free estimate, or try again tomorrow.",
+        });
+        return;
+      }
+      next();
+    }).catch(() => {
+      console.error('staff check failed');
+      res.status(500).json({ error: 'Something went wrong' });
+    });
   };
 }
 

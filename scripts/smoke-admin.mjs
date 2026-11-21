@@ -21,6 +21,7 @@ const {
   emailProblem, nameProblem, publicUser, summarizeOrder,
   decidePasswordReset, newResetToken, hashResetToken, resetTokenProblem, parseResetHours,
   mintResetUserAllowed, passwordResetError, RESET_LINK_ERROR, RESET_MAX_HOURS, RESET_TOKEN_BYTES,
+  sessionIsStaff, normalizeUserEmail, strictUserId,
   controlCharProblem, CONTROL_CHAR_ERROR, nonStringProblem, controlCharIn, nulCharIn, strictRowId,
 } = authz;
 
@@ -73,6 +74,16 @@ const pub = publicUser({
 });
 check('public user drops password hashes', !('passwordHash' in pub) && !('password_hash' in pub) && !JSON.stringify(pub).includes('should-not-leak'));
 check('public user keeps role and login', pub.role === 'admin' && pub.lastLoginAt === null && pub.disabled === false);
+check('public user omits email until an admin view asks', !('email' in pub));
+const withEmail = publicUser({
+  id: 4, name: 'Ada', username: 'Ada', role: 'user', createdAt: '2026-01-01', email: '  Ada@Example.com ',
+  passwordHash: 'should-not-leak',
+}, { includeEmail: true });
+check('admin view normalizes email and still drops the hash', withEmail.email === 'ada@example.com' && !('passwordHash' in withEmail) && !JSON.stringify(withEmail).includes('should-not-leak'));
+check('empty email clears and a bad email is refused', normalizeUserEmail('  ').ok === true && normalizeUserEmail('  ').email === null && normalizeUserEmail('not-an-email').ok === false);
+check('email is one plain address', normalizeUserEmail('Ada@Example.com').email === 'ada@example.com' && normalizeUserEmail('a,b@c.com').ok === false && normalizeUserEmail('a b@c.com').ok === false && normalizeUserEmail('a<b>@c.com').ok === false && normalizeUserEmail('a\u0000@b.co').ok === false);
+check('route ids are strict integers', strictUserId('14') === 14 && strictUserId('14abc') === null && strictUserId('1e3') === null && strictUserId('0') === null && strictUserId('01') === null);
+check('staff session requires an enabled account', sessionIsStaff(null) === false && sessionIsStaff({ disabled: true }) === false && sessionIsStaff({ disabled: false }) === true);
 check('unknown role becomes user', publicUser({ id: 2, name: 'A', username: 'a', role: 'owner', createdAt: '2026-01-01' }).role === 'user');
 
 const order = summarizeOrder({
@@ -122,12 +133,51 @@ const scoped = authSrc.match(/UPDATE users SET password_hash = \$1 WHERE id = \$
 check('password updates target one user id', scoped.length >= 2);
 check('reset locks the reset row', authSrc.includes('FOR UPDATE OF r'));
 check('password reset table is created idempotently', /CREATE TABLE IF NOT EXISTS password_resets/.test(seedSrc) && /CREATE UNIQUE INDEX IF NOT EXISTS password_resets_token_hash_idx/.test(seedSrc) && /CREATE INDEX IF NOT EXISTS password_resets_user_id_idx/.test(seedSrc));
+check('email unique index is created idempotently', /CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx/.test(seedSrc) && /lower\(email\)/.test(seedSrc) && /WHERE email IS NOT NULL/.test(seedSrc));
 
 const mintSrc = fs.readFileSync(path.join(root, 'scripts/mint-reset.ts'), 'utf8');
 const securitySrc = fs.readFileSync(path.join(root, 'server/middleware/security.ts'), 'utf8');
 check('mint reuses the app origin', securitySrc.includes('https://measurenow-production.up.railway.app') && mintSrc.includes('https://measurenow-production.up.railway.app'));
 check('mint default file is private', mintSrc.includes('/workspace/private/mn-reset-link.txt'));
 check('mint source does not print the token or link', !mintSrc.includes('console.log(link)') && !mintSrc.includes('console.log(token)') && !mintSrc.includes('console.error(link)') && !mintSrc.includes('console.error(token)'));
+const resetSrc = fs.readFileSync(path.join(root, 'server/passwordReset.ts'), 'utf8');
+check('reset mailer does not log the link or token', !resetSrc.includes('console.log') && !resetSrc.includes('console.error(link)') && !resetSrc.includes('console.error(token)') && !resetSrc.includes('console.error(err'));
+check('forgot-password is not behind the staff-skipping limiter', authSrc.includes("authRouter.post('/forgot-password'") && !authSrc.includes("perIpLimit('forgot"));
+check('reset mail leaves the database before the send', authSrc.includes('void sendPasswordResetEmail') && authSrc.includes("await client.query('COMMIT')"));
+
+const resetMod = require(path.join(root, 'dist-server/passwordReset.js'));
+const staleAt = Date.now() - (resetMod.FORGOT_WINDOW_MS + 5000);
+resetMod.forgotLimitedAt('192.0.2.8', 'user:stale', staleAt);
+const beforePrune = resetMod.forgotBucketCount();
+resetMod.forgotLimitedAt('192.0.2.9', 'user:live', Date.now());
+check('expired forgot keys are removed', beforePrune === 2 && resetMod.forgotBucketCount() === 2);
+const capNow = Date.now();
+const targetKey = 'id:4242';
+for (let n = 0; n < resetMod.FORGOT_MAX; n += 1) {
+  resetMod.forgotDecision(`192.0.2.${10 + n}`, targetKey, capNow);
+}
+let targetSends = 0;
+const targetAttempt = (ip) => {
+  const decision = resetMod.forgotDecision(ip, targetKey, capNow);
+  if (decision === 'allow') targetSends += 1;
+  return decision;
+};
+const sixth = targetAttempt('192.0.2.40');
+for (let i = 0; i < resetMod.FORGOT_CAP + 25; i += 1) {
+  const ip = `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+  resetMod.forgotDecision(ip, `user:flood${i}`, capNow);
+}
+const afterFlood = targetAttempt('192.0.2.41');
+check('forgot map stays within the cap', resetMod.forgotBucketCount() <= resetMod.FORGOT_CAP);
+check('a live account stays limited when the cap fills', sixth === 'limited' && afterFlood === 'limited' && targetSends === 0);
+let closed = null;
+for (let i = 0; i < resetMod.FORGOT_CAP + 5 && closed == null; i += 1) {
+  const ip = `11.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+  const decision = resetMod.forgotDecision(ip, `id:${10000 + i}`, capNow);
+  if (decision === 'closed') closed = decision;
+}
+const afterClosed = targetAttempt('192.0.2.42');
+check('a full account map fails closed without resetting a live bucket', closed === 'closed' && afterClosed === 'limited' && targetSends === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

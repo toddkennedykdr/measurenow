@@ -17,6 +17,21 @@ function poolErrorCode(err: unknown): string {
   return 'Error';
 }
 
+export const USER_EMAIL_UNIQUE_INDEX = 'users_email_lower_idx';
+
+/** Constraint name when `err` is a unique violation, otherwise null. Walks `cause`. */
+export function uniqueViolation(err: unknown): string | null {
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const row = current as { code?: unknown; constraint?: unknown; cause?: unknown };
+    if (row.code === '23505') return typeof row.constraint === 'string' ? row.constraint : '';
+    current = row.cause;
+  }
+  return null;
+}
+
 // Idle clients emit errors here when Postgres drops them. Log the code only, and keep running.
 pool.on('error', (err: unknown) => {
   console.error(JSON.stringify({ type: 'pool-error', code: poolErrorCode(err) }));
@@ -52,7 +67,16 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
   `);
+  try {
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx
+      ON users (lower(email)) WHERE email IS NOT NULL
+    `);
+  } catch (err) {
+    console.error(JSON.stringify({ type: 'email-index', code: poolErrorCode(err) }));
+  }
   await pool.query(`
     DO $$ BEGIN
       ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user'));

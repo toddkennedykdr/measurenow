@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
-import { db, pool, schema } from '../db';
+import { db, pool, schema, uniqueViolation, USER_EMAIL_UNIQUE_INDEX } from '../db';
 import { asyncRoute, loadSessionUser, perIpLimit, requireAuth } from '../middleware/security';
+import { destroySessionsForUser } from '../sessionStore';
 import {
   CONTROL_CHAR_ERROR,
   controlCharProblem,
@@ -12,11 +13,23 @@ import {
   hashInviteToken,
   hashResetToken,
   inviteTokenProblem,
+  normalizeUserEmail,
   passwordProblem,
   passwordResetError,
   RESET_LINK_ERROR,
   resetTokenProblem,
 } from '../authz';
+import {
+  forgotAccountKey,
+  forgotDecision,
+  forgotWaitMs,
+  issuePasswordReset,
+  passwordResetUrl,
+  RESET_EMAIL_HOURS,
+  resetEmailConfigured,
+  sendPasswordResetEmail,
+  waitForForgot,
+} from '../passwordReset';
 
 export const authRouter = Router();
 
@@ -76,7 +89,7 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
   try {
     await client.query('BEGIN');
     const found = await client.query(
-      `SELECT id, name, username, used_at, revoked_at, expires_at FROM invites WHERE token_hash = $1 FOR UPDATE`,
+      `SELECT id, name, username, email, used_at, revoked_at, expires_at FROM invites WHERE token_hash = $1 FOR UPDATE`,
       [hashInviteToken(token)],
     );
     const row = found.rows[0];
@@ -109,9 +122,18 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+    const normalizedEmail = normalizeUserEmail(row.email);
+    const email = normalizedEmail.ok ? normalizedEmail.email : null;
+    if (email) {
+      const emailTaken = await client.query(`SELECT id FROM users WHERE lower(email) = $1 LIMIT 1`, [email]);
+      if (emailTaken.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'That email is already in use' });
+      }
+    }
     await client.query(
-      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1, $2, $3, 'user', false)`,
-      [row.username, passwordHash, row.name],
+      `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1, $2, $3, 'user', false, $4)`,
+      [row.username, passwordHash, row.name, email],
     );
     const marked = await client.query(
       `UPDATE invites SET used_at = NOW() WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL RETURNING id`,
@@ -125,7 +147,11 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
     return res.json({ ok: true, username: row.username });
   } catch (err: any) {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }
-    if (err?.code === '23505') {
+    const violation = uniqueViolation(err);
+    if (violation === USER_EMAIL_UNIQUE_INDEX) {
+      return res.status(409).json({ error: 'That email is already in use' });
+    }
+    if (violation != null) {
       return res.status(409).json({ error: 'An account with that username already exists. This invite cannot change an existing password.' });
     }
     console.error('accept-invite failed');
@@ -218,6 +244,11 @@ authRouter.post('/reset-password', resetLimit, asyncRoute(async (req: Request, r
       return res.status(400).json({ error: RESET_LINK_ERROR });
     }
     await client.query('COMMIT');
+    try {
+      await destroySessionsForUser(Number(row.user_id));
+    } catch {
+      console.error('session revoke failed');
+    }
     return res.json({ ok: true });
   } catch {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }
@@ -226,6 +257,86 @@ authRouter.post('/reset-password', resetLimit, asyncRoute(async (req: Request, r
   } finally {
     client.release();
   }
+}));
+
+const FORGOT_OK = { ok: true };
+const FORGOT_LIMIT = { error: 'Too many reset requests. Please wait and try again.' };
+
+async function findForgotUser(lookup: ReturnType<typeof forgotAccountKey>['lookup']) {
+  if (!lookup) return null;
+  const found = lookup.kind === 'email'
+    ? await pool.query(
+      `SELECT id, disabled, email FROM users WHERE lower(email) = $1`,
+      [lookup.email],
+    )
+    : await pool.query(
+      `SELECT id, disabled, email FROM users WHERE lower(username) = lower($1)`,
+      [lookup.username],
+    );
+  if (found.rows.length !== 1) return null;
+  return found.rows[0] as { id: number; disabled: boolean; email: string | null };
+}
+
+/** Mint after the response clock has started. The Resend call runs only after commit and is not awaited. */
+async function queueForgotSend(user: { id: number; disabled: boolean; email: string | null }) {
+  const address = typeof user.email === 'string' ? user.email.trim() : '';
+  if (user.disabled || !address || !resetEmailConfigured()) return;
+  const client = await pool.connect();
+  let token = '';
+  try {
+    await client.query('BEGIN');
+    const issued = await issuePasswordReset(client, Number(user.id), RESET_EMAIL_HOURS);
+    if (!issued.ok) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    const fresh = await client.query(`SELECT email, disabled FROM users WHERE id = $1`, [user.id]);
+    const currentEmail = typeof fresh.rows[0]?.email === 'string' ? fresh.rows[0].email.trim() : '';
+    if (!currentEmail || fresh.rows[0]?.disabled) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    token = issued.token;
+    await client.query('COMMIT');
+    const link = passwordResetUrl(token);
+    void sendPasswordResetEmail(currentEmail, link, RESET_EMAIL_HOURS).catch(() => {
+      console.error('reset email failed');
+    });
+  } catch {
+    try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+    console.error('forgot-password failed');
+  } finally {
+    client.release();
+  }
+}
+
+// Always the same 200. A logged-in cookie does not skip the limiter.
+authRouter.post('/forgot-password', asyncRoute(async (req: Request, res: Response) => {
+  if (nonStringProblem(req.body?.identifier) || controlCharProblem(req.body?.identifier)) {
+    return res.status(400).json({ error: CONTROL_CHAR_ERROR });
+  }
+  const started = Date.now();
+  const waitMs = forgotWaitMs();
+  const parsed = forgotAccountKey(req.body?.identifier);
+  let accountKey = parsed.key;
+  let user: { id: number; disabled: boolean; email: string | null } | null = null;
+  try {
+    user = await findForgotUser(parsed.lookup);
+    if (user) accountKey = `id:${Number(user.id)}`;
+  } catch {
+    console.error('forgot-password failed');
+  }
+  const decision = forgotDecision(String(req.ip || ''), accountKey, Date.now());
+  if (decision === 'limited') {
+    return res.status(429).json(FORGOT_LIMIT);
+  }
+  try {
+    if (decision === 'allow' && user) await queueForgotSend(user);
+  } catch {
+    console.error('forgot-password failed');
+  }
+  await waitForForgot(started, waitMs);
+  return res.json(FORGOT_OK);
 }));
 
 authRouter.post('/change-password', requireAuth, asyncRoute(async (req: Request, res: Response) => {

@@ -7,6 +7,11 @@ export function accessDecision(user: { role: string; disabled: boolean } | null,
   return 200;
 }
 
+/** A live session counts as staff only while that account exists and is enabled. */
+export function sessionIsStaff(user: { disabled: boolean } | null): boolean {
+  return user != null && user.disabled === false;
+}
+
 export function shouldSeedAdmin(userCount: number, password: string | undefined): 'seed' | 'skip-not-empty' | 'skip-no-password' | 'skip-short-password' {
   if (userCount > 0) return 'skip-not-empty';
   if (!password) return 'skip-no-password';
@@ -183,7 +188,15 @@ export function decideInviteAccept(input: {
 }
 
 const USERNAME_RE = /^[A-Za-z0-9._-]{2,40}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}$/;;
+
+/** Path ids are decimal integers only. `14abc` and `1e3` are not ids. */
+export function strictUserId(raw: unknown): number | null {
+  if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw)) return null;
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id)) return null;
+  return id;
+}
 
 export function usernameProblem(username: unknown): string | null {
   const typed = nonStringProblem(username);
@@ -202,8 +215,22 @@ export function emailProblem(email: unknown): string | null {
   const controls = controlCharProblem(email);
   if (controls) return controls;
   if (email == null || email === '') return null;
-  if (typeof email !== 'string' || email.length > 120 || !EMAIL_RE.test(email.trim())) return 'Enter a valid email or leave it blank';
+  if (typeof email !== 'string') return 'Enter a valid email or leave it blank';
+  const trimmed = email.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > 120 || /[\s,<>]/.test(trimmed) || !EMAIL_RE.test(trimmed)) return 'Enter a valid email or leave it blank';
   return null;
+}
+
+/** Empty clears the address. Anything kept is trimmed and lowercased. */
+export function normalizeUserEmail(email: unknown): { ok: true; email: string | null } | { ok: false; error: string } {
+  if (email == null) return { ok: true, email: null };
+  if (typeof email !== 'string') return { ok: false, error: 'Enter a valid email or leave it blank' };
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed) return { ok: true, email: null };
+  const problem = emailProblem(trimmed);
+  if (problem) return { ok: false, error: problem };
+  return { ok: true, email: trimmed };
 }
 
 export function nameProblem(name: unknown): string | null {
@@ -224,10 +251,11 @@ export function publicUser(row: {
   createdAt: Date | string;
   lastLoginAt?: Date | string | null;
   disabled?: boolean | null;
+  email?: string | null;
   passwordHash?: string;
   password_hash?: string;
-}) {
-  return {
+}, options?: { includeEmail?: boolean }) {
+  const user = {
     id: row.id,
     name: row.name,
     username: row.username,
@@ -236,6 +264,9 @@ export function publicUser(row: {
     lastLoginAt: row.lastLoginAt == null ? null : (row.lastLoginAt instanceof Date ? row.lastLoginAt.toISOString() : row.lastLoginAt),
     disabled: Boolean(row.disabled),
   };
+  if (!options?.includeEmail) return user;
+  const email = normalizeUserEmail(row.email ?? null);
+  return { ...user, email: email.ok ? email.email : null };
 }
 
 function asObj(v: unknown): Record<string, any> {
