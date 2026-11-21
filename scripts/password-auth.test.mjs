@@ -553,6 +553,21 @@ async function main() {
     );
     const nlLogin = await jpost('/api/auth/login', { username: 'Todd\n', password: 'x' });
     check('auth fields still reject newlines', nlLogin.status === 400 && nlLogin.data.error === 'Invalid characters');
+    const c0Probe = 'probeC019f3a';
+    const c0Report = await jpost('/api/reports', {
+      address: '12 Café Lane',
+      lat: 35.78,
+      lng: -78.64,
+      analysis: { text: `kept\u0001${c0Probe}` },
+    }, { cookie: toddNow.cookie });
+    const afterC0 = await jget('/api/auth/me', { cookie: toddNow.cookie });
+    check(
+      'other C0 in report text is rejected',
+      c0Report.status === 400
+        && c0Report.data.error === 'Invalid characters'
+        && !JSON.stringify(c0Report.data).includes(c0Probe)
+        && afterC0.status === 200,
+    );
     check('oversized report id is rejected', hugeReport.status === 400 || hugeReport.status === 404);
     check('server stays up after report checks', afterReport.status === 200);
 
@@ -591,7 +606,7 @@ async function main() {
     check('bad percent encoding is 400', badUri.status === 400 && badUriBody.error === 'Bad request');
     check('unknown route error is still a generic 500', unknownFault.status === 500 && unknownFault.data.error === 'Something went wrong');
     check('client errors stay out of error-level logs', errorLinesBefore() === beforeClient + 1);
-    check('client and pool logs omit request fields', !log.includes('probeJson9f3a') && !log.includes('probeNulByte9f3a') && !log.includes('probeRpt9f3a') && !log.includes('poolprobe9f3a') && log.includes('pool-error') && log.includes('ECONNRESET'));
+    check('client and pool logs omit request fields', !log.includes('probeJson9f3a') && !log.includes('probeNulByte9f3a') && !log.includes('probeRpt9f3a') && !log.includes('probeC019f3a') && !log.includes('poolprobe9f3a') && log.includes('pool-error') && log.includes('ECONNRESET'));
     const burstIp = '198.51.100.231';
     const burst = [];
     for (let n = 0; n < 31; n += 1) {
