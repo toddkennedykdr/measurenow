@@ -29,6 +29,8 @@ export function hashInviteToken(token: string): string {
 }
 
 export function inviteTokenProblem(token: unknown): string | null {
+  const typed = nonStringProblem(token);
+  if (typed) return typed;
   const controls = controlCharProblem(token);
   if (controls) return controls;
   if (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token)) return 'Invite link is invalid';
@@ -53,6 +55,17 @@ export function controlCharProblem(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Arrays, numbers, objects, and null are not strings. An omitted field is
+ * undefined and stays with the required-field check. Optional email may be null.
+ */
+export function nonStringProblem(value: unknown, optional = false): string | null {
+  if (value === undefined) return null;
+  if (optional && value === null) return null;
+  if (typeof value !== 'string') return CONTROL_CHAR_ERROR;
+  return null;
+}
+
 /** True when any string in a JSON value contains a C0 or C1 control character. */
 export function controlCharIn(value: unknown): boolean {
   if (typeof value === 'string') return CONTROL_CHARS.test(value);
@@ -70,6 +83,8 @@ export function strictRowId(raw: unknown): number | null {
 }
 
 export function passwordProblem(password: unknown): string | null {
+  const typed = nonStringProblem(password);
+  if (typed) return typed;
   const controls = controlCharProblem(password);
   if (controls) return controls;
   if (typeof password !== 'string' || password.length < 12) return 'Password must be at least 12 characters';
@@ -96,6 +111,8 @@ export function hashResetToken(token: string): string {
 }
 
 export function resetTokenProblem(token: unknown): string | null {
+  const typed = nonStringProblem(token);
+  if (typed) return typed;
   const controls = controlCharProblem(token);
   if (controls) return controls;
   if (typeof token !== 'string' || !RESET_TOKEN_RE.test(token)) return RESET_LINK_ERROR;
@@ -171,6 +188,8 @@ export function strictUserId(raw: unknown): number | null {
 }
 
 export function usernameProblem(username: unknown): string | null {
+  const typed = nonStringProblem(username);
+  if (typed) return typed;
   const controls = controlCharProblem(username);
   if (controls) return controls;
   if (typeof username !== 'string' || !USERNAME_RE.test(username.trim())) {
@@ -180,6 +199,8 @@ export function usernameProblem(username: unknown): string | null {
 }
 
 export function emailProblem(email: unknown): string | null {
+  const typed = nonStringProblem(email, true);
+  if (typed) return typed;
   const controls = controlCharProblem(email);
   if (controls) return controls;
   if (email == null || email === '') return null;
@@ -202,6 +223,8 @@ export function normalizeUserEmail(email: unknown): { ok: true; email: string | 
 }
 
 export function nameProblem(name: unknown): string | null {
+  const typed = nonStringProblem(name);
+  if (typed) return typed;
   const controls = controlCharProblem(name);
   if (controls) return controls;
   if (typeof name !== 'string' || name.trim().length < 1 || name.trim().length > 80) return 'Name is required';

@@ -781,6 +781,21 @@ async function main() {
     const afterAmbiguous = Number((await client.query(`SELECT COUNT(*)::int AS n FROM password_resets WHERE user_id = ANY($1::int[])`, [caseIds])).rows[0].n);
     check('ambiguous username case sends nothing', ambiguous.status === 200 && JSON.stringify(ambiguous.data) === '{"ok":true}' && ambiguous.ms >= 790 && afterAmbiguous === beforeAmbiguous);
 
+    const forgotProbe = 'probeForgot9f3a';
+    const forgotErrorsBefore = (log.match(/"type":"request-error"/g) || []).length;
+    const forgotArr = await jpost('/api/auth/forgot-password', { identifier: [`ada\u0000${forgotProbe}`] }, { ip: '198.51.100.140' });
+    const forgotNum = await jpost('/api/auth/forgot-password', { identifier: 12 }, { ip: '198.51.100.141' });
+    const forgotObj = await jpost('/api/auth/forgot-password', { identifier: { name: forgotProbe } }, { ip: '198.51.100.142' });
+    const forgotNull = await jpost('/api/auth/forgot-password', { identifier: null }, { ip: '198.51.100.143' });
+    const forgotStill = await jget('/api/auth/me');
+    await new Promise(r => setTimeout(r, 50));
+    const forgotErrorsAfter = (log.match(/"type":"request-error"/g) || []).length;
+    check('forgot array identifier is rejected', forgotArr.status === 400 && forgotArr.data.error === 'Invalid characters' && !JSON.stringify(forgotArr.data).includes(forgotProbe));
+    check('forgot number identifier is rejected', forgotNum.status === 400 && forgotNum.data.error === 'Invalid characters');
+    check('forgot object identifier is rejected', forgotObj.status === 400 && forgotObj.data.error === 'Invalid characters');
+    check('forgot null identifier is rejected', forgotNull.status === 400 && forgotNull.data.error === 'Invalid characters');
+    check('forgot non-strings are not error-level', forgotErrorsAfter === forgotErrorsBefore && forgotStill.status === 401 && !log.includes(forgotProbe));
+
     const sess = await client.query(
       `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
       ['sessuser', bcrypt.hashSync(PW.ada, 10), 'Sess User'],
@@ -855,6 +870,38 @@ async function main() {
     const acceptNul = await jpost('/api/auth/accept-invite', { token: `${probe}\u0000`, password: `long-enough-pw\u0000${probe}` });
     check('invite with a nul is rejected', inviteNul.status === 400 && inviteNul.data.error === 'Invalid characters');
     check('invite accept with a nul is rejected', acceptNul.status === 400 && acceptNul.data.error === 'Invalid characters');
+
+    const typeProbe = 'probeType9f3a';
+    const typeErrorsBefore = (log.match(/"type":"request-error"/g) || []).length;
+    const arrUser = await jpost('/api/auth/login', { username: [`Todd\u0000${typeProbe}`], password: 'x' });
+    const numPass = await jpost('/api/auth/login', { username: 'Todd', password: 12 });
+    const objUser = await jpost('/api/auth/login', { username: { name: typeProbe }, password: 'x' });
+    const nullUser = await jpost('/api/auth/login', { username: null, password: 'x' });
+    const afterTypeLogin = await jget('/api/auth/me');
+    const inviteTypes = await jpost('/api/admin/invites', {
+      name: ['Ada'],
+      username: 12,
+      email: { address: typeProbe },
+    }, { cookie: toddNow.cookie });
+    const acceptTypes = await jpost('/api/auth/accept-invite', { token: [typeProbe], password: { secret: typeProbe } });
+    const resetTypes = await jpost('/api/auth/reset-password', { token: null, password: ['long-enough-password'] });
+    const changeTypes = await jpost('/api/auth/change-password', {
+      currentPassword: { secret: typeProbe },
+      password: null,
+    }, { cookie: toddNow.cookie });
+    const afterTypes = await jget('/api/auth/me', { cookie: toddNow.cookie });
+    await new Promise(r => setTimeout(r, 50));
+    const typeErrorsAfter = (log.match(/"type":"request-error"/g) || []).length;
+    check('array username is rejected', arrUser.status === 400 && arrUser.data.error === 'Invalid characters' && !JSON.stringify(arrUser.data).includes(typeProbe));
+    check('number password is rejected', numPass.status === 400 && numPass.data.error === 'Invalid characters');
+    check('object username is rejected', objUser.status === 400 && objUser.data.error === 'Invalid characters');
+    check('null username is rejected', nullUser.status === 400 && nullUser.data.error === 'Invalid characters');
+    check('invite non-strings are rejected', inviteTypes.status === 400 && inviteTypes.data.error === 'Invalid characters');
+    check('invite accept non-strings are rejected', acceptTypes.status === 400 && acceptTypes.data.error === 'Invalid characters');
+    check('reset non-strings are rejected', resetTypes.status === 400 && resetTypes.data.error === 'Invalid characters');
+    check('change-password non-strings are rejected', changeTypes.status === 400 && changeTypes.data.error === 'Invalid characters');
+    check('server stays up after non-string auth fields', afterTypeLogin.status === 401 && afterTypes.status === 200);
+    check('non-string auth fields are not error-level', typeErrorsAfter === typeErrorsBefore && !log.includes(typeProbe));
 
     const fault = await jget(`/api/auth/__fault?marker=${probe}`);
     const afterFault = await jget('/api/auth/me');
