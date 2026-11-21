@@ -92,6 +92,17 @@ app.use((req, res, next) => {
 });
 // CORS: only our own origins (prod Railway domain, ALLOWED_ORIGINS, localhost in dev).
 app.use(cors(corsOptionsDelegate));
+
+// Rate limit: 30 requests per minute per IP (keyed on the real client IP via trust proxy).
+// This sits ahead of the JSON parser so a malformed body counts toward the same limit.
+app.use('/api', rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again in a minute.' },
+}));
+
 app.use(express.json({ limit: '10mb' }));
 
 // Session
@@ -110,15 +121,6 @@ app.use(session({
 
 // Browser requests from foreign origins are refused outright.
 app.use('/api', blockForeignOrigins);
-
-// Rate limit: 30 requests per minute per IP (now keyed on the real client IP via trust proxy)
-app.use('/api', rateLimit({
-  windowMs: 60_000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please try again in a minute.' },
-}));
 
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);

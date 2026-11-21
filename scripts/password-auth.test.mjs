@@ -1125,6 +1125,27 @@ async function main() {
     const hugeReport = await jget('/api/reports/99999999999', { cookie: toddNow.cookie });
     const afterReport = await jget('/api/auth/me', { cookie: toddNow.cookie });
     check('nul report data is rejected', nulReport.status === 400 && nulReport.data.error === 'Invalid characters' && !JSON.stringify(nulReport.data).includes(reportProbe));
+    const note = 'North slope\nSecond line\r\nTab\there café 😀';
+    const aiText = 'Analysis\nkept\r\nspacing\tand café 😀';
+    const multiline = await jpost('/api/reports', {
+      address: '12 Café Lane',
+      lat: 35.78,
+      lng: -78.64,
+      roofData: { notes: note },
+      analysis: { text: aiText },
+    }, { cookie: toddNow.cookie });
+    const savedId = multiline.data && multiline.data.id;
+    const roundTrip = savedId ? await jget(`/api/reports/${savedId}`, { cookie: toddNow.cookie }) : { status: 0, data: {} };
+    check(
+      'multiline report text is saved',
+      multiline.status === 200
+        && roundTrip.status === 200
+        && roundTrip.data.address === '12 Café Lane'
+        && roundTrip.data.roofData && roundTrip.data.roofData.notes === note
+        && roundTrip.data.analysis && roundTrip.data.analysis.text === aiText,
+    );
+    const nlLogin = await jpost('/api/auth/login', { username: 'Todd\n', password: 'x' });
+    check('auth fields still reject newlines', nlLogin.status === 400 && nlLogin.data.error === 'Invalid characters');
     check('oversized report id is rejected', hugeReport.status === 400 || hugeReport.status === 404);
     check('server stays up after report checks', afterReport.status === 200);
 
@@ -1164,6 +1185,18 @@ async function main() {
     check('unknown route error is still a generic 500', unknownFault.status === 500 && unknownFault.data.error === 'Something went wrong');
     check('client errors stay out of error-level logs', errorLinesBefore() === beforeClient + 1);
     check('client and pool logs omit request fields', !log.includes('probeJson9f3a') && !log.includes('probeNulByte9f3a') && !log.includes('probeRpt9f3a') && !log.includes('poolprobe9f3a') && log.includes('pool-error') && log.includes('ECONNRESET'));
+    const burstIp = '198.51.100.231';
+    const burst = [];
+    for (let n = 0; n < 31; n += 1) {
+      const res = await fetch(BASE + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': burstIp },
+        body: '{"broken":',
+      });
+      const data = await res.json().catch(() => ({}));
+      burst.push(res.status === 429 ? 429 : data.error === 'Bad request' ? 400 : res.status);
+    }
+    check('a burst of malformed json is throttled', burst.slice(0, 30).every(status => status === 400) && burst[30] === 429);
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));

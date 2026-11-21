@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { eq, desc } from 'drizzle-orm';
 import { db, schema } from '../db';
 import { asyncRoute, requireAuth, SessionUser } from '../middleware/security';
-import { CONTROL_CHAR_ERROR, controlCharIn, strictRowId } from '../authz';
+import { CONTROL_CHAR_ERROR, nulCharIn, strictRowId } from '../authz';
 
 export const reportsRouter = Router();
 
@@ -14,7 +14,7 @@ function optionalCoord(value: unknown, min: number, max: number): { ok: true; va
 
 // Save report
 reportsRouter.post('/', requireAuth, asyncRoute(async (req: Request, res: Response) => {
-  if (controlCharIn(req.body)) return res.status(400).json({ error: CONTROL_CHAR_ERROR });
+  if (nulCharIn(req.body)) return res.status(400).json({ error: CONTROL_CHAR_ERROR });
   const body = req.body || {};
   const { address, lat, lng, roofData, analysis, quote, photos } = body;
   if (typeof address !== 'string' || !address.trim()) return res.status(400).json({ error: 'Address required' });
