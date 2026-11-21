@@ -6,6 +6,7 @@ import { asyncRoute, loadSessionUser, perIpLimit, requireAuth } from '../middlew
 import {
   CONTROL_CHAR_ERROR,
   controlCharProblem,
+  nonStringProblem,
   decideInviteAccept,
   decidePasswordReset,
   hashInviteToken,
@@ -21,7 +22,10 @@ export const authRouter = Router();
 
 authRouter.post('/login', asyncRoute(async (req: Request, res: Response) => {
   const { username, password } = req.body;
-  if (controlCharProblem(username) || controlCharProblem(password)) {
+  if (
+    nonStringProblem(username) || nonStringProblem(password)
+    || controlCharProblem(username) || controlCharProblem(password)
+  ) {
     return res.status(400).json({ error: CONTROL_CHAR_ERROR });
   }
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
@@ -228,7 +232,9 @@ authRouter.post('/change-password', requireAuth, asyncRoute(async (req: Request,
   const pwError = passwordProblem(req.body?.password);
   if (pwError) return res.status(400).json({ error: pwError });
   const currentPassword = req.body?.currentPassword;
-  if (controlCharProblem(currentPassword)) return res.status(400).json({ error: CONTROL_CHAR_ERROR });
+  if (nonStringProblem(currentPassword) || controlCharProblem(currentPassword)) {
+    return res.status(400).json({ error: CONTROL_CHAR_ERROR });
+  }
   if (typeof currentPassword !== 'string' || currentPassword.length === 0) {
     return res.status(400).json({ error: 'Current password is required' });
   }
