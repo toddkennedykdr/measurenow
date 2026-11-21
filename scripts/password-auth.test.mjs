@@ -753,6 +753,76 @@ async function main() {
     const dupEmail = await jpatch(`/api/admin/users/${copyId}`, { email: 'ADA@example.com' }, { cookie: toddCookie });
     check('duplicate email is rejected', dupEmail.status === 409 && dupEmail.data.error === 'That email is already in use');
 
+    const inviteDup = await jpost('/api/admin/invites', {
+      name: 'Dup Mail',
+      username: 'dupmail1',
+      email: 'ADA@example.com',
+    }, { cookie: toddCookie });
+    const inviteDupRow = await client.query(`SELECT id FROM invites WHERE lower(username) = 'dupmail1'`);
+    check('invite create rejects an email that is already in use', inviteDup.status === 409 && inviteDup.data.error === 'That email is already in use' && inviteDupRow.rows.length === 0);
+    const acceptDupToken = track(randomBytes(16).toString('hex'));
+    await client.query(
+      `INSERT INTO invites (name, username, email, token_hash, expires_at)
+       VALUES ($1, $2, $3, $4, (NOW() AT TIME ZONE 'UTC') + interval '1 hour')`,
+      ['Dup Accept', 'dupmailaccept', 'Ada@Example.com', sha(acceptDupToken)],
+    );
+    const acceptDup = await jpost('/api/auth/accept-invite', { token: acceptDupToken, password: PW.invite });
+    const acceptDupUser = await client.query(`SELECT id FROM users WHERE username = 'dupmailaccept'`);
+    check('invite accept rejects an email that is already in use', acceptDup.status === 409 && acceptDup.data.error === 'That email is already in use' && acceptDupUser.rows.length === 0);
+
+    const raceA = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['racea', bcrypt.hashSync(PW.ada, 10), 'Race A'],
+    );
+    const raceB = await client.query(
+      `INSERT INTO users (username, password_hash, name, role, disabled) VALUES ($1,$2,$3,'user',false) RETURNING id`,
+      ['raceb', bcrypt.hashSync(PW.ada, 10), 'Race B'],
+    );
+    const raceEmail = 'race.user@example.com';
+    const raceIds = [Number(raceA.rows[0].id), Number(raceB.rows[0].id)];
+    const raceResults = await Promise.all(Array.from({ length: 10 }, (_, n) => (
+      jpatch(`/api/admin/users/${raceIds[n % 2]}`, { email: raceEmail }, { cookie: toddCookie, ip: `198.51.100.${160 + n}` })
+    )));
+    const raceWins = raceResults.filter(result => result.status === 200);
+    const raceOwners = await client.query(`SELECT id FROM users WHERE lower(email) = $1`, [raceEmail]);
+    check(
+      'concurrent email updates allow one winner',
+      raceWins.length === 1
+        && raceResults.filter(result => result.status === 409).length === 9
+        && raceOwners.rows.length === 1,
+    );
+
+    const dupProbe = 'dupidx-probe@example.com';
+    await client.query(`DROP INDEX IF EXISTS users_email_lower_idx`);
+    await client.query(`UPDATE users SET email = $1 WHERE username = 'racea'`, ['DupIdx-Probe@example.com']);
+    await client.query(`UPDATE users SET email = $1 WHERE username = 'raceb'`, [dupProbe]);
+    const dupLog = path.join(os.tmpdir(), `mn-dupidx-${process.pid}.log`);
+    fs.writeFileSync(dupLog, '');
+    const dupSrv = spawn(process.execPath, entry, {
+      cwd: root,
+      env: childEnv({ PORT: '3191', OUTBOUND_LOG: dupLog }),
+    });
+    let dupOut = '';
+    dupSrv.stdout.on('data', d => { dupOut += d; });
+    dupSrv.stderr.on('data', d => { dupOut += d; });
+    let dupBooted = false;
+    for (let i = 0; i < 50; i += 1) {
+      try {
+        const res = await fetch('http://127.0.0.1:3191/api/auth/me');
+        if (res.status === 401 || res.status === 200) { dupBooted = true; break; }
+      } catch { /* still booting */ }
+      if (i === 49) break;
+      await new Promise(r => setTimeout(r, 200));
+    }
+    if (dupSrv.pid) dupSrv.kill();
+    await new Promise(r => setTimeout(r, 50));
+    check(
+      'duplicate emails do not stop boot',
+      dupBooted && dupOut.includes('"type":"email-index"') && dupOut.includes('"code":"23505"') && !dupOut.includes(dupProbe) && !dupOut.includes('DupIdx-Probe'),
+    );
+    await client.query(`UPDATE users SET email = NULL WHERE username IN ('racea', 'raceb')`);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email)) WHERE email IS NOT NULL`);
+
     await client.query(
       `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1,$2,$3,'user',false,$4)`,
       ['shareduser', bcrypt.hashSync(PW.ada, 10), 'Shared User', 'shared.user@example.com'],

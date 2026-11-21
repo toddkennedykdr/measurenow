@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { eq } from 'drizzle-orm';
-import { db, pool, schema } from '../db';
+import { db, pool, schema, uniqueViolation, USER_EMAIL_UNIQUE_INDEX } from '../db';
 import { PROD_ORIGIN, adminRateLimit, asyncRoute, requireAdmin, SessionUser } from '../middleware/security';
 import { auditAdmin } from '../audit';
 import { destroySessionsForUser } from '../sessionStore';
@@ -93,7 +93,12 @@ adminRouter.patch('/users/:id', asyncRoute(async (req: Request, res: Response) =
   const patch: { disabled?: boolean; email?: string | null } = {};
   if (touchesDisabled) patch.disabled = disabled;
   if (touchesEmail) patch.email = email;
-  await db.update(schema.users).set(patch).where(eq(schema.users.id, id));
+  try {
+    await db.update(schema.users).set(patch).where(eq(schema.users.id, id));
+  } catch (err) {
+    if (uniqueViolation(err) != null) return res.status(409).json({ error: 'That email is already in use' });
+    throw err;
+  }
   if (touchesDisabled && disabled) {
     await pool.query(
       `UPDATE password_resets SET used_at = (NOW() AT TIME ZONE 'UTC') WHERE user_id = $1 AND used_at IS NULL`,
@@ -194,7 +199,14 @@ adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
 
   const name = String(req.body.name).trim();
   const username = String(req.body.username).trim();
-  const email = req.body?.email ? String(req.body.email).trim() : null;
+  const normalizedEmail = normalizeUserEmail(req.body?.email);
+  if (!normalizedEmail.ok) return res.status(400).json({ error: normalizedEmail.error });
+  const email = normalizedEmail.email;
+
+  if (email) {
+    const dupEmail = await pool.query(`SELECT id FROM users WHERE lower(email) = $1 LIMIT 1`, [email]);
+    if (dupEmail.rows[0]) return res.status(409).json({ error: 'That email is already in use' });
+  }
 
   const existing = await pool.query(`SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1`, [username]);
   if (existing.rows[0]) {
@@ -210,14 +222,22 @@ adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
 
   const token = newInviteToken();
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
-  const inserted = await db.insert(schema.invites).values({
-    name,
-    username,
-    email,
-    tokenHash: hashInviteToken(token),
-    createdBy: current(req).id,
-    expiresAt,
-  }).returning({ id: schema.invites.id });
+  let inserted: { id: number }[];
+  try {
+    inserted = await db.insert(schema.invites).values({
+      name,
+      username,
+      email,
+      tokenHash: hashInviteToken(token),
+      createdBy: current(req).id,
+      expiresAt,
+    }).returning({ id: schema.invites.id });
+  } catch (err) {
+    if (uniqueViolation(err) === USER_EMAIL_UNIQUE_INDEX) {
+      return res.status(409).json({ error: 'That email is already in use' });
+    }
+    throw err;
+  }
 
   const inviteUrl = `${PROD_ORIGIN}/invite/${token}`;
   return res.json({

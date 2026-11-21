@@ -132,6 +132,7 @@ const scoped = authSrc.match(/UPDATE users SET password_hash = \$1 WHERE id = \$
 check('password updates target one user id', scoped.length >= 2);
 check('reset locks the reset row', authSrc.includes('FOR UPDATE OF r'));
 check('password reset table is created idempotently', /CREATE TABLE IF NOT EXISTS password_resets/.test(seedSrc) && /CREATE UNIQUE INDEX IF NOT EXISTS password_resets_token_hash_idx/.test(seedSrc) && /CREATE INDEX IF NOT EXISTS password_resets_user_id_idx/.test(seedSrc));
+check('email unique index is created idempotently', /CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx/.test(seedSrc) && /lower\(email\)/.test(seedSrc) && /WHERE email IS NOT NULL/.test(seedSrc));
 
 const mintSrc = fs.readFileSync(path.join(root, 'scripts/mint-reset.ts'), 'utf8');
 const securitySrc = fs.readFileSync(path.join(root, 'server/middleware/security.ts'), 'utf8');

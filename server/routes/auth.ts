@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
-import { db, pool, schema } from '../db';
+import { db, pool, schema, uniqueViolation, USER_EMAIL_UNIQUE_INDEX } from '../db';
 import { asyncRoute, loadSessionUser, perIpLimit, requireAuth } from '../middleware/security';
 import { destroySessionsForUser } from '../sessionStore';
 import {
@@ -124,6 +124,13 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
     const passwordHash = await bcrypt.hash(password, 10);
     const normalizedEmail = normalizeUserEmail(row.email);
     const email = normalizedEmail.ok ? normalizedEmail.email : null;
+    if (email) {
+      const emailTaken = await client.query(`SELECT id FROM users WHERE lower(email) = $1 LIMIT 1`, [email]);
+      if (emailTaken.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'That email is already in use' });
+      }
+    }
     await client.query(
       `INSERT INTO users (username, password_hash, name, role, disabled, email) VALUES ($1, $2, $3, 'user', false, $4)`,
       [row.username, passwordHash, row.name, email],
@@ -140,7 +147,11 @@ authRouter.post('/accept-invite', perIpLimit('invite-accept', 15 * 60_000, 20), 
     return res.json({ ok: true, username: row.username });
   } catch (err: any) {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }
-    if (err?.code === '23505') {
+    const violation = uniqueViolation(err);
+    if (violation === USER_EMAIL_UNIQUE_INDEX) {
+      return res.status(409).json({ error: 'That email is already in use' });
+    }
+    if (violation != null) {
       return res.status(409).json({ error: 'An account with that username already exists. This invite cannot change an existing password.' });
     }
     console.error('accept-invite failed');
