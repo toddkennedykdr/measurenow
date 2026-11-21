@@ -365,4 +365,10 @@ if (process.env.ROUTE_FAULT === '1') {
     (err as NodeJS.ErrnoException).code = 'EFAULT';
     throw err;
   }));
+  authRouter.get('/__pool-fault', asyncRoute(async (_req: Request, res: Response) => {
+    const err = new Error('poolprobe9f3a');
+    (err as NodeJS.ErrnoException).code = 'ECONNRESET';
+    pool.emit('error', err);
+    return res.json({ ok: true });
+  }));
 }

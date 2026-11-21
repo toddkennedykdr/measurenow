@@ -8,6 +8,20 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://localhost:5432/me
 
 export const pool = new Pool({ connectionString: DATABASE_URL });
 
+function poolErrorCode(err: unknown): string {
+  if (!err || typeof err !== 'object') return 'Error';
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(code)) return code;
+  const name = (err as { name?: unknown }).name;
+  if (typeof name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name)) return name;
+  return 'Error';
+}
+
+// Idle clients emit errors here when Postgres drops them. Log the code only, and keep running.
+pool.on('error', (err: unknown) => {
+  console.error(JSON.stringify({ type: 'pool-error', code: poolErrorCode(err) }));
+});
+
 export const db: NodePgDatabase<typeof schema> = drizzle(pool, { schema });
 
 export async function initDb() {

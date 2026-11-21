@@ -878,6 +878,51 @@ async function main() {
         && !log.includes('linkuser')
         && !log.includes('Link User'),
     );
+
+    const reportProbe = 'probeRpt9f3a';
+    const nulReport = await jpost('/api/reports', { address: `1 Main\u0000${reportProbe}`, lat: 'bad' }, { cookie: toddNow.cookie });
+    const hugeReport = await jget('/api/reports/99999999999', { cookie: toddNow.cookie });
+    const afterReport = await jget('/api/auth/me', { cookie: toddNow.cookie });
+    check('nul report data is rejected', nulReport.status === 400 && nulReport.data.error === 'Invalid characters' && !JSON.stringify(nulReport.data).includes(reportProbe));
+    check('oversized report id is rejected', hugeReport.status === 400 || hugeReport.status === 404);
+    check('server stays up after report checks', afterReport.status === 200);
+
+    const poolFault = await jget('/api/auth/__pool-fault');
+    const afterPool = await jget('/api/auth/me');
+    check('pool error does not exit', poolFault.status === 200 && poolFault.data.ok === true && afterPool.status === 401);
+
+    const errorLinesBefore = () => (log.match(/"type":"request-error"/g) || []).length;
+    await new Promise(r => setTimeout(r, 50));
+    const beforeClient = errorLinesBefore();
+    const malformed = await fetch(BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body: '{"probeJson9f3a":',
+    });
+    const malformedBody = await malformed.json().catch(() => ({}));
+    const rawNul = await fetch(BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body: Buffer.concat([Buffer.from('{"username":"'), Buffer.from([0]), Buffer.from('probeNulByte9f3a"}')]),
+    });
+    const rawNulBody = await rawNul.json().catch(() => ({}));
+    const tooBig = await fetch(BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body: `{"username":"${'a'.repeat(11 * 1024 * 1024)}"}`,
+    });
+    const tooBigBody = await tooBig.json().catch(() => ({}));
+    const badUri = await fetch(BASE + '/api/auth/reset-password/%FF', { headers: { 'x-forwarded-for': nextIp() } });
+    const badUriBody = await badUri.json().catch(() => ({}));
+    const unknownFault = await jget('/api/auth/__fault');
+    await new Promise(r => setTimeout(r, 80));
+    check('malformed json is 400', malformed.status === 400 && malformedBody.error === 'Bad request' && !JSON.stringify(malformedBody).includes('probeJson9f3a'));
+    check('raw nul byte in json is 400', rawNul.status === 400 && !JSON.stringify(rawNulBody).includes('probeNulByte9f3a'));
+    check('oversized body is 413', tooBig.status === 413 && tooBigBody.error === 'Payload too large');
+    check('bad percent encoding is 400', badUri.status === 400 && badUriBody.error === 'Bad request');
+    check('unknown route error is still a generic 500', unknownFault.status === 500 && unknownFault.data.error === 'Something went wrong');
+    check('client errors stay out of error-level logs', errorLinesBefore() === beforeClient + 1);
+    check('client and pool logs omit request fields', !log.includes('probeJson9f3a') && !log.includes('probeNulByte9f3a') && !log.includes('probeRpt9f3a') && !log.includes('poolprobe9f3a') && log.includes('pool-error') && log.includes('ECONNRESET'));
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));
