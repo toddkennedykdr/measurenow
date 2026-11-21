@@ -862,6 +862,22 @@ async function main() {
     check('forced route rejection is a generic 500', fault.status === 500 && fault.data.error === 'Something went wrong' && !JSON.stringify(fault.data).includes(probe));
     check('server stays up after a forced rejection', afterFault.status === 401);
     check('logs omit the posted fields', !log.includes(probe) && log.includes('EFAULT') && !log.includes('forced'));
+
+    const made = await jpost('/api/admin/invites', { name: 'Link User', username: 'linkuser' }, { cookie: toddNow.cookie });
+    const madeUrl = String(made.data.inviteUrl || '');
+    const madeToken = madeUrl.includes('/') ? madeUrl.slice(madeUrl.lastIndexOf('/') + 1) : '';
+    track(madeUrl);
+    track(madeToken);
+    check(
+      'invite url uses the configured origin',
+      made.status === 200
+        && madeUrl.startsWith('https://measurenow-production.up.railway.app/invite/')
+        && !madeUrl.includes('127.0.0.1')
+        && madeToken.length === 32
+        && !log.includes(madeToken)
+        && !log.includes('linkuser')
+        && !log.includes('Link User'),
+    );
   } catch (err) {
     fail++;
     console.error('ERROR', redact(err && err.stack ? err.stack : err));

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { eq } from 'drizzle-orm';
 import { db, pool, schema } from '../db';
-import { adminRateLimit, asyncRoute, requireAdmin, SessionUser } from '../middleware/security';
+import { PROD_ORIGIN, adminRateLimit, asyncRoute, requireAdmin, SessionUser } from '../middleware/security';
 import { auditAdmin } from '../audit';
 import { destroySessionsForUser } from '../sessionStore';
 import {
@@ -219,7 +219,7 @@ adminRouter.post('/invites', asyncRoute(async (req: Request, res: Response) => {
     expiresAt,
   }).returning({ id: schema.invites.id });
 
-  const inviteUrl = `${req.protocol}://${req.get('host')}/invite/${token}`;
+  const inviteUrl = `${PROD_ORIGIN}/invite/${token}`;
   return res.json({
     invite: { id: inserted[0].id, name, username, email, expiresAt: expiresAt.toISOString() },
     inviteUrl,

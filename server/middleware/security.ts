@@ -96,7 +96,7 @@ function envInt(name: string, fallback: number): number {
 // ---------------------------------------------------------------------------
 // CORS / origin allowlist
 // ---------------------------------------------------------------------------
-const PROD_ORIGIN = 'https://measurenow-production.up.railway.app';
+export const PROD_ORIGIN = 'https://measurenow-production.up.railway.app';
 const DEV_ORIGINS = ['http://localhost:5173', 'http://localhost:3001', 'http://127.0.0.1:5173', 'http://127.0.0.1:3001'];
 
 export function allowedOrigins(): string[] {
