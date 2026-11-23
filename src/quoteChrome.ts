@@ -6,8 +6,7 @@ export const KD_CALL = {
   label: 'Call K&D Roofing: (919) 977-4074',
 } as const;
 
-export const QUOTE_DISCLAIMER =
-  'This is a budget estimate, not a bid or quote. Final pricing is confirmed after an on-site inspection.';
+export { QUOTE_DISCLAIMER } from '../server/services/quoteCardCopy';
 
 export const LEAD_SUBMITTED_MESSAGE = { type: 'measurenow:lead-submitted' } as const;
 

@@ -67,6 +67,12 @@ const embedOrigins = parseEmbedParentOrigins(process.env.EMBED_PARENT_ORIGINS, m
 const QUOTE_FRAME_ANCESTORS = ["'self'", ...embedOrigins];
 const extraEmbedOrigins = embedOrigins.length > HARDCODED_EMBED_ORIGINS.length;
 const defaultHelmet = helmet({ contentSecurityPolicy: false });
+// Email clients load /static/kd-logo.png and the badge from another origin.
+// Only that path gets cross-origin CORP. Every other route keeps defaultHelmet.
+const staticAssetHelmet = helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+});
 const quoteEmbedHelmet = helmet({
   contentSecurityPolicy: {
     useDefaults: false,
@@ -83,7 +89,15 @@ function isQuoteDocument(urlPath: string): boolean {
   return urlPath === '/quote' || urlPath === '/quote/';
 }
 
+function isStaticAsset(urlPath: string): boolean {
+  return urlPath === '/static' || urlPath.startsWith('/static/');
+}
+
 app.use((req, res, next) => {
+  if (isStaticAsset(req.path)) {
+    staticAssetHelmet(req, res, next);
+    return;
+  }
   if (isQuoteDocument(req.path)) {
     quoteEmbedHelmet(req, res, next);
     return;
@@ -140,6 +154,26 @@ if (process.env.NODE_ENV === 'production') {
   const distDir = path.join(__dirname, '..', 'dist');
   const indexFile = path.join(distDir, 'index.html');
   let quoteHtml: string | null = null;
+  const staticDir = path.join(distDir, 'static');
+  app.use('/static', (req, res, next) => {
+    const raw = req.originalUrl.split('?')[0];
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (!decoded.startsWith('/static/') || decoded.includes('..') || decoded.includes('\\') || decoded.includes('\0')) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    next();
+  });
+  app.use('/static', express.static(staticDir));
+  app.use('/static', (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
   app.use(express.static(distDir));
   app.get('*', (req, res) => {
     if (extraEmbedOrigins && isQuoteDocument(req.path)) {

@@ -4,19 +4,15 @@ export type QuoteIncludeItem = {
   linkText?: string;
 };
 
-/** Warranty copy for each shingle card. Labor and algae years differ by product. */
-export const QUOTE_WARRANTY = {
-  label: 'Warranty:',
-  wind: '15-year WindProven™ Limited Wind Warranty, no max wind speed',
-  goldenPledge: {
-    hdz: 'GAF Golden Pledge Warranty, 50-year shingle with 25-year labor backed by GAF',
-    uhdz: 'GAF Golden Pledge Warranty, 50-year shingle with 30-year labor backed by GAF',
-  },
-  algae: {
-    hdz: '25-year StainGuard Plus™ Algae Protection Limited Warranty',
-    uhdz: '30-year StainGuard Plus PRO™ Algae Protection Limited Warranty',
-  },
-} as const;
+export {
+  HDZ_SHINGLE_NAME,
+  UHDZ_SHINGLE_NAME,
+  QUOTE_WARRANTY,
+  formatQuotePrice,
+  formatRoofSqFt,
+  quoteCardWarrantyLines,
+} from '../server/services/quoteCardCopy';
+export type { QuoteShingleTier } from '../server/services/quoteCardCopy';
 
 /** What's included on each shingle card. Edit this list to change those items. */
 export const QUOTE_INCLUDES: readonly QuoteIncludeItem[] = [

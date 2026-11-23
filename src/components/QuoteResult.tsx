@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { FullQuoteData } from '../types';
 import { KD_CALL, QUOTE_DISCLAIMER } from '../quoteChrome';
-import { GAF_CONTRACTOR_ID, GAF_MASTER_ELITE_LABEL, QUOTE_INCLUDES, QUOTE_WARRANTY } from '../quoteIncludes';
+import {
+  formatQuotePrice,
+  formatRoofSqFt,
+  GAF_CONTRACTOR_ID,
+  GAF_MASTER_ELITE_LABEL,
+  HDZ_SHINGLE_NAME,
+  QUOTE_INCLUDES,
+  QUOTE_WARRANTY,
+  UHDZ_SHINGLE_NAME,
+} from '../quoteIncludes';
 
 interface Props {
   data: FullQuoteData;
@@ -92,12 +101,9 @@ export function QuoteResult({ data, onStartOver }: Props) {
 
   const { quote, roofData, address } = data;
 
-  const formatPrice = (n: number) =>
-    n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-
   function shingleRadio(tier: ShingleOption) {
     const selected = option === tier;
-    const name = tier === 'hdz' ? 'GAF Timberline HDZ' : 'GAF Timberline UHDZ';
+    const name = tier === 'hdz' ? HDZ_SHINGLE_NAME : UHDZ_SHINGLE_NAME;
     const total = tier === 'hdz' ? quote.hdzEstimate : quote.uhdzEstimate;
     return (
       <button
@@ -115,7 +121,7 @@ export function QuoteResult({ data, onStartOver }: Props) {
           {selected ? 'Selected' : 'Select'}
         </span>
         <span className="quote-option__name">{name}</span>
-        <span className="quote-result__price">{formatPrice(total)}</span>
+        <span className="quote-result__price">{formatQuotePrice(total)}</span>
       </button>
     );
   }
@@ -127,7 +133,7 @@ export function QuoteResult({ data, onStartOver }: Props) {
 
         <div className="quote-stats" role="group" aria-label="Roof measurement">
           <div className="quote-stat">
-            <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
+            <span className="quote-stat__value">{formatRoofSqFt(roofData.totalAreaSqFt)}</span>
             <span className="quote-stat__label">Sq Ft</span>
           </div>
           <div className="quote-stat">

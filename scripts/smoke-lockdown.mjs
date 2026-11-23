@@ -2,6 +2,7 @@
 // SKIP_DB_INIT=1 and a fetch stub (no real Google/Claude/Resend/JobNimbus calls).
 // Usage: npm run build && node scripts/smoke-lockdown.mjs
 import { spawn, spawnSync } from 'node:child_process';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -197,6 +198,37 @@ try {
       `status=${r.status} xfo=${xfo} csp=${csp} corp=${corp}`,
     );
   }
+  const staticLogo = await req('/static/kd-logo.png');
+  const staticCorp = staticLogo.headers.get('cross-origin-resource-policy');
+  const pageCorp = (await req('/login')).headers.get('cross-origin-resource-policy');
+  check(
+    'static assets are cross-origin and a normal page stays same-origin',
+    staticLogo.status === 200
+      && (staticLogo.headers.get('content-type') || '').includes('image/png')
+      && staticCorp === 'cross-origin'
+      && staticLogo.headers.get('content-security-policy') === null
+      && pageCorp === 'same-origin',
+    `status=${staticLogo.status} corp=${staticCorp} page=${pageCorp}`,
+  );
+  const missingStatic = await req('/static/nope.png');
+  const missingBody = await missingStatic.text();
+  const traversal = await new Promise((resolve, reject) => {
+    const request = http.request({ hostname: '127.0.0.1', port: PORT, path: '/static/..%2Findex.html', method: 'GET' }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+  check(
+    'unknown static paths return 404 instead of the app shell',
+    missingStatic.status === 404
+      && !missingBody.startsWith('<!DOCTYPE html>')
+      && traversal.status === 404
+      && !traversal.body.startsWith('<!DOCTYPE html>'),
+    `missing=${missingStatic.status} traversal=${traversal.status}`,
+  );
 } catch (e) {
   fail++; console.error('ERROR', e);
 } finally {

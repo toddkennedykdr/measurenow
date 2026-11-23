@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import type { RoofQuote } from './pricing';
+import { maybeSendCustomerEstimateEmail } from './customerEstimateEmail';
 
 /** How long a gated quote can be re-opened without sending another lead. */
 export const ACCESS_TTL_MS = 30 * 60 * 1000;
@@ -46,6 +47,8 @@ type Session = {
   quote: RoofQuote;
   roof: StoredRoof;
   address: string | null;
+  /** Formatted address from geocoding, stored when the quote session is created. */
+  geocodedAddress: string | null;
   leadSent: boolean;
   fingerprint: string | null;
 };
@@ -93,6 +96,7 @@ export function createQuoteSession(input: {
   lng: number;
   quote: RoofQuote;
   roof: StoredRoof;
+  geocodedAddress?: string | null;
 }): Session {
   sweep();
   const now = Date.now();
@@ -105,6 +109,7 @@ export function createQuoteSession(input: {
     quote: input.quote,
     roof: input.roof,
     address: null,
+    geocodedAddress: input.geocodedAddress || null,
     leadSent: false,
     fingerprint: null,
   };
@@ -297,6 +302,18 @@ export async function openQuoteForContact(session: Session, contact: ContactInpu
     }
 
     rememberLead(current, contact, fingerprint, true);
+    if (process.env.CUSTOMER_ESTIMATE_EMAIL_ENABLED === 'true') {
+      maybeSendCustomerEstimateEmail({
+        to: contact.email.trim(),
+        name: contact.name.trim(),
+        address: current.geocodedAddress || '',
+        roofSqFt: current.roof.totalAreaSqFt,
+        hdzEstimate: current.quote.hdzEstimate,
+        uhdzEstimate: current.quote.uhdzEstimate,
+        lat: current.lat,
+        lng: current.lng,
+      });
+    }
     const token = signQuoteToken(current.id, current.expiresAt);
     return { ok: true as const, leadCreated: true, token, body: pricedBody(current) };
   }));
