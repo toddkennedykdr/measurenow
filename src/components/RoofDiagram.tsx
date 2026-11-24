@@ -91,9 +91,13 @@ export function RoofDiagram({ roofData, analysis }: Props) {
     { pts: [tr, br, ridgeR], label: 'Right' },
   ];
 
-  // Distribute segment data across facets
+  // Quote and address reports pass a facet count, not per-plane areas.
+  // Split the measured roof area across the plan so those facets are not 0.
+  const sharedFacetArea = segments.length
+    ? 0
+    : Math.round((roofData.totalAreaSqFt || 0) / facetPolygons.length);
   const planSegments = facetPolygons.map((f, i) => {
-    const seg = segments[i] || segments[0] || { areaSqFt: 0, pitchDegrees: avgPitch };
+    const seg = segments[i] || segments[0] || { areaSqFt: sharedFacetArea, pitchDegrees: avgPitch };
     return { ...f, seg };
   });
 

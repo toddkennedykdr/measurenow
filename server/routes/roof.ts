@@ -2,9 +2,9 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { roofApiKeyMatches } from '../middleware/roofAccess';
 import { rejectIfPublicDailyCap } from '../publicDailyCap';
+import { buildAddressRoofReport } from '../services/addressReport';
 import { geocodeAddress } from '../services/geocode';
 import { getBuildingInsights } from '../services/solar';
-import { calculateQuote, type RoofQuote } from '../services/pricing';
 
 export const roofRouter = Router();
 
@@ -38,6 +38,12 @@ const quoteSchema = z.object({
   lat: z.number(),
   lng: z.number(),
 });
+
+const addressReportSchema = quoteSchema.extend({
+  address: z.string().optional(),
+});
+
+const NO_ROOF_DATA = "We don't have roof data for this location yet. Please call us for a free estimate!";
 
 // Step 1: Geocode only — returns lat/lng and formatted address
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
@@ -79,32 +85,52 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
 
     const building = await getBuildingInsights(lat, lng);
     if (!building) {
-      return res.status(404).json({
-        error: "We don't have roof data for this location yet. Please call us for a free estimate!",
-      });
+      return res.status(404).json({ error: NO_ROOF_DATA });
     }
 
-    const quote = calculateQuote(building);
+    const report = buildAddressRoofReport(building);
 
     return res.json({
       lat,
       lng,
-      roofData: {
-        totalAreaSqFt: Math.round(building.totalAreaSqFt),
-        segments: building.segments.length,
-        avgPitchDegrees: Math.round(building.avgPitch * 10) / 10,
-        imageryQuality: building.imageryQuality,
-        footprintSqFt: building.footprintSqFt,
-        estimatedPerimeterFt: building.estimatedPerimeterFt,
-        estimatedLength: building.estimatedLength,
-        estimatedWidth: building.estimatedWidth,
-      },
-      quote,
+      roofData: report.roofData,
+      quote: report.quote,
     });
   } catch (err: any) {
     console.error('Quote error:', err.message || err);
     return res.status(500).json({
       error: 'Something went wrong generating your quote. Please try again or call us directly.',
+    });
+  }
+});
+
+// Address-only roof report. Same satellite data as /quote, plus wall
+// measurements. Photos are not accepted and Gemini is not called.
+roofRouter.post('/address-report', async (req: Request, res: Response) => {
+  try {
+    const parsed = addressReportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid coordinates.' });
+    }
+    if (!skipsPublicDailyCap(req) && rejectIfPublicDailyCap(res)) return;
+
+    const { lat, lng, address } = parsed.data;
+    const building = await getBuildingInsights(lat, lng);
+    if (!building) {
+      return res.status(404).json({ error: NO_ROOF_DATA });
+    }
+
+    const report = buildAddressRoofReport(building);
+    return res.json({
+      lat,
+      lng,
+      address: address || '',
+      ...report,
+    });
+  } catch (err: any) {
+    console.error('Address report error:', err.message || err);
+    return res.status(500).json({
+      error: 'Something went wrong generating your roof report. Please try again or call us directly.',
     });
   }
 });

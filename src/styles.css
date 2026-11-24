@@ -445,6 +445,35 @@ body {
   border-bottom: 1px solid var(--gray-200);
 }
 
+.inspect-satellite-mini .quote-result__price {
+  font-size: 28px;
+  margin-top: 4px;
+}
+
+.photo-optional {
+  margin-top: 16px;
+  border-top: 1px solid var(--gray-200);
+  padding-top: 12px;
+}
+
+.photo-optional summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 12px;
+}
+
+.inspect-analysis-notice {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 /* Photo Grid */
 .photo-grid {
   display: grid;

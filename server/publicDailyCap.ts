@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 
-/** Shared budget for public POST /api/roof/geocode and POST /api/roof/quote. */
+/** Shared budget for public geocode, quote, and address-report calls. */
 export const ROOF_PUBLIC_DAILY_CAP_ENV = 'ROOF_PUBLIC_DAILY_CAP';
 export const DEFAULT_PUBLIC_DAILY_CAP = 500;
 export const PUBLIC_DAILY_CAP_STATUS = 503;

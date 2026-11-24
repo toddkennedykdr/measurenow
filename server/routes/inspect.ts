@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
+import { analyzeInspectionPhotos } from '../services/gemini';
 import { getBuildingInsights, calculateWallArea } from '../services/solar';
 
 export const inspectRouter = Router();
@@ -17,8 +18,10 @@ const upload = multer({
 inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Request, res: Response) => {
   try {
     const files = req.files as Express.Multer.File[];
-    if (!files || files.length < 4) {
-      return res.status(400).json({ error: 'Please upload at least 4 photos.' });
+    if (!files || files.length < 1) {
+      return res.status(400).json({
+        error: 'Add at least one photo to run AI analysis, or generate the roof report without photos.',
+      });
     }
 
     const lat = parseFloat(req.body.lat);
@@ -29,98 +32,20 @@ inspectRouter.post('/analyze-photos', upload.array('photos', 12), async (req: Re
       return res.status(400).json({ error: 'Invalid coordinates.' });
     }
 
-    const imageContents: any[] = [];
+    const images: { mimeType: string; dataBase64: string }[] = [];
     for (const file of files) {
       const resized = await sharp(file.buffer)
         .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer();
-      const base64 = resized.toString('base64');
-      imageContents.push({
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: base64 },
-      });
+      images.push({ mimeType: 'image/jpeg', dataBase64: resized.toString('base64') });
     }
 
-    const systemPrompt = `You are an expert roofing and siding inspector analyzing photos of a residential property. Analyze ALL provided photos and return ONLY valid JSON (no markdown, no code fences) with this exact structure:
-{
-  "roofType": "gable|hip|flat|mansard|gambrel|shed|combination|other",
-  "material": { "type": "asphalt shingle|metal|tile|slate|wood shake|flat/TPO|other", "condition": "good|fair|poor" },
-  "features": [{ "type": "dormer|skylight|chimney|vent|pipe|satellite dish|gutter|valley|hip ridge|ridge|rake|eave", "count": 1, "location": "description" }],
-  "complexity": { "rating": 3, "explanation": "reason" },
-  "damage": [{ "type": "missing shingles|cracking|moss/algae|sagging|flashing damage|storm damage|wear", "severity": "none|minor|major", "location": "description", "description": "details" }],
-  "accessIssues": ["steep slope", "tall building", "trees close to roof", "power lines nearby"],
-  "estimatedStories": 2,
-  "overallCondition": { "rating": "good|fair|poor", "notes": "summary" },
-  "recommendations": ["recommendation 1", "recommendation 2"],
-  "sidingMaterial": "vinyl|HardiBoard/fiber cement|wood|brick|stone|stucco|aluminum|mixed|other",
-  "sidingCondition": { "rating": "good|fair|poor", "notes": "description of siding condition" },
-  "sidingDamage": [{ "type": "cracking|fading|warping|moisture damage|holes|loose panels|rot|peeling paint", "severity": "none|minor|major", "location": "description", "description": "details" }],
-  "estimatedWallArea": 2000,
-  "sidingRecommendations": ["recommendation 1", "recommendation 2"],
-  "estimatedOpeningsArea": 400,
-  "estimatedTrimLength": 200,
-  "estimatedRidgeLength": 40,
-  "estimatedValleyLength": 30,
-  "estimatedRakeLength": 80,
-  "estimatedEaveLength": 120,
-  "estimatedDripEdge": 200,
-  "estimatedCorners": { "inside": 4, "outside": 6 },
-  "estimatedFacets": 8
-}
-MEASUREMENT ESTIMATION GUIDELINES:
-- estimatedOpeningsArea: total sq ft of windows and doors visible on the exterior
-- estimatedTrimLength: total linear feet of exterior trim (around windows, doors, corners, fascia)
-- estimatedRidgeLength: total linear feet of roof ridges (main peak + any secondary ridges)
-- estimatedValleyLength: total linear feet of roof valleys
-- estimatedRakeLength: total linear feet of rakes (sloped edges of the roof at gable ends)
-- estimatedEaveLength: total linear feet of eaves (horizontal edges of the roof)
-- estimatedDripEdge: total linear feet of drip edge (perimeter of roof — typically rakes + eaves)
-- estimatedCorners: count of inside and outside corners on the building exterior
-- estimatedFacets: total number of distinct roof planes/faces
-- estimatedWallArea: total exterior wall sq ft based on visible walls, stories, and approximate footprint. For a ~1500 sq ft footprint 2-story house, walls are roughly 2400-3000 sq ft.
-Use your best professional judgment for all estimates. If you cannot determine something, use reasonable defaults. Always provide the full structure.`;
-
-    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 3000,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: `Analyze these ${files.length} photos of a property at ${address || `${lat}, ${lng}`}. Provide a detailed roofing AND siding inspection analysis.` },
-              ...imageContents,
-            ],
-          },
-        ],
-      }),
-    });
-
-    if (!anthropicRes.ok) {
-      const errText = await anthropicRes.text();
-      console.error('Anthropic API error:', errText);
-      return res.status(500).json({ error: 'AI analysis failed. Please try again.' });
+    const result = await analyzeInspectionPhotos({ images, address, lat, lng });
+    if (!result.ok) {
+      return res.status(503).json({ error: result.userMessage });
     }
-
-    const anthropicData = await anthropicRes.json() as any;
-    const raw = anthropicData.content?.[0]?.text || '{}';
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-
-    let analysis;
-    try {
-      analysis = JSON.parse(cleaned);
-    } catch {
-      console.error('Failed to parse OpenAI response:', raw);
-      return res.status(500).json({ error: 'AI analysis returned invalid format. Please try again.' });
-    }
+    const analysis = result.analysis as any;
 
     // Calculate wall area from Solar API data instead of relying on AI estimate
     let buildingMeasurements: any = null;
@@ -166,7 +91,9 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
     if (repEmail) recipients.push(repEmail);
 
     const complexityMultipliers: Record<number, number> = { 1: 1.0, 2: 1.05, 3: 1.1, 4: 1.15, 5: 1.3 };
-    const mult = complexityMultipliers[analysis?.complexity?.rating || 3] || 1.1;
+    const hasAnalysis = !!analysis;
+    const complexityRating = hasAnalysis ? (analysis?.complexity?.rating || 3) : 0;
+    const mult = hasAnalysis ? (complexityMultipliers[complexityRating] || 1.1) : 1;
     const adjLow = Math.round((quote?.lowEstimate || 0) * mult / 100) * 100;
     const adjHigh = Math.round((quote?.highEstimate || 0) * mult / 100) * 100;
 
@@ -246,7 +173,7 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
           </div>
         </div>
 
-        <!-- SIDING SUMMARY -->
+        ${hasAnalysis ? `<!-- SIDING SUMMARY -->
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <h2 style="color:#032D59;margin:0;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px">Siding Summary</h2>
@@ -264,17 +191,17 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
             <tr><th style="${thStyle}">Factor</th><th style="${thStyle}">Area (sq ft)</th><th style="${thStyle}">Squares</th></tr>
             ${sidingWasteRows}
           </table>
-        </div>
+        </div>` : ''}
 
         <!-- ROOF SUMMARY -->
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <h2 style="color:#032D59;margin:0;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px">Roof Summary</h2>
-            <span style="background:${condColor(analysis?.overallCondition?.rating || 'fair')};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${(analysis?.overallCondition?.rating || 'N/A').toUpperCase()}</span>
+            <span style="background:${hasAnalysis ? condColor(analysis?.overallCondition?.rating || 'fair') : '#2563eb'};color:white;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${hasAnalysis ? (analysis?.overallCondition?.rating || 'N/A').toUpperCase() : 'SATELLITE'}</span>
           </div>
           <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
             <tr><td style="padding:6px 0;width:33%"><strong>Area:</strong> ${roofArea.toLocaleString()} sq ft</td><td style="width:33%"><strong>Squares:</strong> ${roofSquares}</td><td><strong>Facets:</strong> ${facets}</td></tr>
-            <tr><td style="padding:6px 0"><strong>Type:</strong> ${analysis?.roofType || 'N/A'}</td><td><strong>Material:</strong> ${analysis?.material?.type || 'N/A'}</td><td><strong>Pitch:</strong> ${quote?.pitchOver12 || 'N/A'}/12</td></tr>
+            <tr><td style="padding:6px 0"><strong>Type:</strong> ${analysis?.roofType || '—'}</td><td><strong>Material:</strong> ${analysis?.material?.type || '—'}</td><td><strong>Pitch:</strong> ${quote?.pitchOver12 || 'N/A'}/12</td></tr>
           </table>
 
           <h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Roof Components</h4>
@@ -296,7 +223,7 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
           </table>
         </div>
 
-        <!-- AI INSPECTION NOTES -->
+        ${hasAnalysis ? `<!-- AI INSPECTION NOTES -->
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
           <h2 style="color:#032D59;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px;margin-bottom:12px">AI Inspection Notes</h2>
           <div style="background:#f9fafb;padding:12px;border-radius:8px;display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -307,17 +234,19 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
           ${damageHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Damage Findings</h4><ul style="margin:0;padding-left:20px;font-size:14px">${damageHtml}</ul>` : ''}
           ${recsHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${recsHtml}</ul>` : ''}
           ${sidingRecsHtml ? `<h4 style="color:#032D59;font-size:13px;text-transform:uppercase;margin:12px 0 6px">Siding Recommendations</h4><ul style="margin:0;padding-left:20px;font-size:14px">${sidingRecsHtml}</ul>` : ''}
-        </div>
+        </div>` : `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:16px;font-size:14px">This report uses satellite roof data for the address. No inspection photos were included.</div>`}
 
         <!-- QUOTE SUMMARY -->
         <div style="background:white;border:2px solid #032D59;border-radius:8px;padding:20px;margin-bottom:16px">
           <h2 style="color:#032D59;font-size:18px;border-bottom:2px solid #032D59;padding-bottom:4px;margin-bottom:12px">Quote Summary</h2>
           <table style="width:100%;border-collapse:collapse;font-size:16px">
-            <tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb"><strong>Roof Replacement</strong> <span style="color:#6b7280;font-size:12px">(${analysis?.material?.type || ''} · ${mult}x complexity)</span></td><td style="text-align:right;font-weight:bold;color:#032D59;border-bottom:1px solid #e5e7eb">$${adjLow.toLocaleString()} – $${adjHigh.toLocaleString()}</td></tr>
+            <tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb"><strong>Roof Replacement</strong> <span style="color:#6b7280;font-size:12px">${hasAnalysis ? `(${analysis?.material?.type || ''} · ${mult}x complexity)` : '(satellite measurement)'}</span></td><td style="text-align:right;font-weight:bold;color:#032D59;border-bottom:1px solid #e5e7eb">$${adjLow.toLocaleString()} – $${adjHigh.toLocaleString()}</td></tr>
             ${wallArea > 0 ? `<tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb"><strong>Siding</strong> <span style="color:#6b7280;font-size:12px">(${sidingLabel})</span></td><td style="text-align:right;font-weight:bold;color:#032D59;border-bottom:1px solid #e5e7eb">$${sidingLow.toLocaleString()} – $${sidingHigh.toLocaleString()}</td></tr>` : ''}
             <tr style="border-top:2px solid #032D59"><td style="padding:14px 0;font-size:18px;font-weight:700;color:#032D59">Total Estimated</td><td style="text-align:right;font-weight:800;color:#E2312B;font-size:22px">$${(adjLow + sidingLow).toLocaleString()} – $${(adjHigh + sidingHigh).toLocaleString()}</td></tr>
           </table>
-          <p style="font-size:12px;color:#6b7280;font-style:italic;margin:8px 0 0">*Estimates based on satellite data + AI photo analysis. Final pricing subject to on-site confirmation.</p>
+          <p style="font-size:12px;color:#6b7280;font-style:italic;margin:8px 0 0">${hasAnalysis
+            ? '*Estimates based on satellite data + AI photo analysis. Final pricing subject to on-site confirmation.'
+            : '*Estimate based on satellite roof data for this address. No inspection photos were included. Final pricing subject to on-site confirmation.'}</p>
         </div>
 
         <p style="color:#6b7280;font-size:12px;text-align:center">Generated by K&D Roofing MeasureNow Inspection Tool · ${reportDate}</p>
