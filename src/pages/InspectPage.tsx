@@ -3,7 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
+import { AiInspectionNotes, FeatureList, SidingDamageList, conditionBadgeClass } from '../components/PhotoAnalysisSections';
 import { useAuth } from '../context/AuthContext';
+import { clampComplexityRating, safeInspection } from '../lib/safeInspection';
 
 // Types
 interface PhotoSlot {
@@ -134,18 +136,6 @@ function formatPrice(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-function severityColor(s: string) {
-  if (s === 'major') return '#E2312B';
-  if (s === 'minor') return '#ca8a04';
-  return '#16a34a';
-}
-
-function conditionColor(c: string) {
-  if (c === 'poor') return '#E2312B';
-  if (c === 'fair') return '#ca8a04';
-  return '#16a34a';
-}
-
 export default function InspectPage() {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>('address');
@@ -162,6 +152,7 @@ export default function InspectPage() {
   );
   const [extraPhotos, setExtraPhotos] = useState<{ file: File; preview: string }[]>([]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [analysisNotice, setAnalysisNotice] = useState('');
   const [buildingMeasurements, setBuildingMeasurements] = useState<BuildingMeasurements | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -244,16 +235,19 @@ export default function InspectPage() {
     try {
       const useLat = pinDragged ? confirmedLat : lat;
       const useLng = pinDragged ? confirmedLng : lng;
-      const res = await fetch('/api/roof/quote', {
+      const res = await fetch('/api/roof/address-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ lat: useLat, lng: useLng }),
+        body: JSON.stringify({ lat: useLat, lng: useLng, address }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setRoofData(data.roofData);
       setQuote(data.quote);
+      setBuildingMeasurements(data.buildingMeasurements ?? null);
+      setAnalysis(null);
+      setAnalysisNotice('');
       if (pinDragged) { setLat(confirmedLat); setLng(confirmedLng); }
       setStep('photos');
     } catch (err: any) {
@@ -280,11 +274,40 @@ export default function InspectPage() {
 
   const totalPhotos = photos.filter(p => p.file).length + extraPhotos.length;
 
-  // Analyze photos
-  const handleAnalyze = async () => {
-    if (totalPhotos < 4) { setError('Take at least 4 photos'); return; }
+  const persistReport = async (nextAnalysis: Analysis | null) => {
+    try {
+      const allFiles = [
+        ...photos.filter(p => p.file).map(p => p.file!),
+        ...extraPhotos.map(p => p.file),
+      ];
+      const thumbnails = allFiles.length ? await Promise.all(allFiles.map(f => fileToThumbnail(f))) : [];
+      const saveRes = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ address, lat, lng, roofData, analysis: nextAnalysis, quote, photos: thumbnails }),
+      });
+      const saveData = await saveRes.json();
+      if (saveData.id) setSavedReportId(saveData.id);
+    } catch { /* The on-screen report stays usable if saving fails. */ }
+  };
+
+  // Photos are optional. Zero photos still produce a satellite roof report.
+  // Photos, when present, add Gemini analysis. A provider failure keeps the report.
+  const handleGetReport = async () => {
+    if (!roofData || !quote) { setError('Get roof data before generating a report'); return; }
+    if (totalPhotos === 0) {
+      setAnalysis(null);
+      setAnalysisNotice('');
+      setError('');
+      setStep('report');
+      await persistReport(null);
+      return;
+    }
+
     setStep('analyzing');
     setError('');
+    setAnalysisNotice('');
     try {
       const formData = new FormData();
       photos.forEach(p => { if (p.file) formData.append('photos', p.file); });
@@ -295,29 +318,26 @@ export default function InspectPage() {
 
       const res = await fetch('/api/roof/analyze-photos', { method: 'POST', credentials: 'include', body: formData });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        const notice = data.error || 'Photo analysis is unavailable right now. Your roof report from the address is still ready.';
+        setAnalysis(null);
+        setAnalysisNotice(notice);
+        setError('');
+        setStep('report');
+        await persistReport(null);
+        return;
+      }
       setAnalysis(data.analysis);
       if (data.buildingMeasurements) setBuildingMeasurements(data.buildingMeasurements);
+      setAnalysisNotice('');
       setStep('report');
-      // Auto-save report if logged in (with photo thumbnails)
-      try {
-        const allFiles = [
-          ...photos.filter(p => p.file).map(p => p.file!),
-          ...extraPhotos.map(p => p.file),
-        ];
-        const thumbnails = await Promise.all(allFiles.map(f => fileToThumbnail(f)));
-        const saveRes = await fetch('/api/reports', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ address, lat, lng, roofData, analysis: data.analysis, quote, photos: thumbnails }),
-        });
-        const saveData = await saveRes.json();
-        if (saveData.id) setSavedReportId(saveData.id);
-      } catch {}
-    } catch (err: any) {
-      setError(err.message || 'Analysis failed');
-      setStep('photos');
+      await persistReport(data.analysis);
+    } catch {
+      setAnalysis(null);
+      setAnalysisNotice('Photo analysis is unavailable right now. Your roof report from the address is still ready.');
+      setError('');
+      setStep('report');
+      await persistReport(null);
     }
   };
 
@@ -329,7 +349,15 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ repEmail, address, roofData, quote, analysis, buildingMeasurements }),
+        body: JSON.stringify({
+          repEmail,
+          address,
+          roofData,
+          quote,
+          analysis,
+          buildingMeasurements,
+          photoAnalysisUnavailable: Boolean(analysisNotice),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -351,7 +379,7 @@ export default function InspectPage() {
       const shortAddr = address.replace(/,?\s*(USA?|United States)$/i, '').trim().replace(/[^a-zA-Z0-9]+/g, '-');
       await html2pdf().from(el).set({
         margin: 0.4,
-        filename: `KD-Roofing-Inspection-${shortAddr}.pdf`,
+        filename: `${analysis ? 'KD-Roofing-Inspection' : 'KD-Roofing-Roof-Report'}-${shortAddr}.pdf`,
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
@@ -365,8 +393,8 @@ export default function InspectPage() {
   };
 
   // Computed values for report
-  const complexityRating = analysis?.complexity?.rating || 3;
-  const complexityMult = COMPLEXITY_MULTIPLIERS[complexityRating] || 1.1;
+  const complexityRating = analysis ? clampComplexityRating(analysis.complexity?.rating) : 0;
+  const complexityMult = analysis ? COMPLEXITY_MULTIPLIERS[complexityRating] : 1;
   const adjLow = Math.round((quote?.lowEstimate || 0) * complexityMult / 100) * 100;
   const adjHigh = Math.round((quote?.highEstimate || 0) * complexityMult / 100) * 100;
 
@@ -384,7 +412,9 @@ export default function InspectPage() {
         <div className="inspect-header__top">
           <div className="header__logo">K&amp;D <span>Roofing</span></div>
         </div>
-        <div className="inspect-header__title">🔍 Roof & Siding Inspection</div>
+        <div className="inspect-header__title">
+          {step === 'report' && !analysis ? '🔍 Roof Report' : '🔍 Roof & Siding Inspection'}
+        </div>
       </header>
 
       {error && <div className="error-msg">{error}</div>}
@@ -393,7 +423,7 @@ export default function InspectPage() {
       {step === 'address' && (
         <div className="card">
           <h2 className="card__title">Enter Property Address</h2>
-          <p className="card__subtitle">Start your on-site inspection</p>
+          <p className="card__subtitle">Enter an address for satellite roof data. Photos are optional.</p>
           <div className="form-group">
             <input
               className="input"
@@ -437,8 +467,12 @@ export default function InspectPage() {
       {step === 'photos' && (
         <div className="card">
           {/* Satellite summary mini */}
+          <h2 className="card__title">Roof Data</h2>
+          <p className="card__subtitle">📍 {address}</p>
           {roofData && quote && (
             <div className="inspect-satellite-mini">
+              <div className="quote-result__price">{formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}</div>
+              <p className="quote-result__price-label">Estimated roof replacement</p>
               <div className="quote-stats">
                 <div className="quote-stat">
                   <span className="quote-stat__value">{roofData.totalAreaSqFt.toLocaleString()}</span>
@@ -456,11 +490,15 @@ export default function InspectPage() {
             </div>
           )}
 
-          <h2 className="card__title">📸 Capture Photos</h2>
-          <p className="card__subtitle">
-            Take photos from all sides + corners. Min 4, recommend 8+.
+          <button className="btn btn--primary" onClick={handleGetReport}>
+            {totalPhotos > 0 ? 'Get Roof Report with AI Photos' : 'Get Roof Report'}
+          </button>
+          <p className="card__subtitle" style={{ marginTop: 12 }}>
+            No photos needed. Add photos below if you want an AI inspection of materials, damage, and siding.
           </p>
 
+          <details className="photo-optional">
+            <summary>Add photos (optional)</summary>
           <div className="photo-grid">
             {photos.map((slot, i) => (
               <div key={slot.label} className={`photo-slot ${slot.file ? 'photo-slot--filled' : ''}`}>
@@ -513,20 +551,17 @@ export default function InspectPage() {
           </div>
 
           <div className="photo-status">
-            <span className={`photo-count ${totalPhotos >= 4 ? 'photo-count--ok' : 'photo-count--low'}`}>
-              {totalPhotos} photo{totalPhotos !== 1 ? 's' : ''} captured
+            <span className="photo-count photo-count--ok">
+              {totalPhotos} photo{totalPhotos !== 1 ? 's' : ''} added
             </span>
-            {totalPhotos < 4 && <span className="photo-count__hint">Need at least 4</span>}
-            {totalPhotos >= 4 && totalPhotos < 8 && <span className="photo-count__hint">Good — 8+ recommended</span>}
-            {totalPhotos >= 8 && <span className="photo-count__hint">Great coverage! ✓</span>}
+            <span className="photo-count__hint">
+              {totalPhotos === 0 ? 'Optional — 4 to 8 recommended for AI' : 'Included in the AI inspection'}
+            </span>
           </div>
+          </details>
 
-          <button
-            className="btn btn--primary"
-            onClick={handleAnalyze}
-            disabled={totalPhotos < 4}
-          >
-            🤖 Analyze Photos with AI
+          <button className="btn btn--primary" onClick={handleGetReport} style={{ marginTop: 16 }}>
+            {totalPhotos > 0 ? 'Get Roof Report with AI Photos' : 'Get Roof Report'}
           </button>
         </div>
       )}
@@ -549,19 +584,187 @@ export default function InspectPage() {
       )}
 
       {/* STEP: Report */}
-      {step === 'report' && analysis && (() => {
+      {step === 'report' && roofData && quote && (() => {
+        if (!analysis) {
+          const roofArea = roofData.totalAreaSqFt || 0;
+          const roofSquares = quote.roofSquares || 0;
+          const facets = typeof roofData.segments === 'number' ? roofData.segments : 0;
+          const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+          const roofWaste = [0, 0.05, 0.10, 0.15, 0.20];
+          return (
+            <div className="inspect-report hover-report" id="printable-report" ref={reportRef}>
+              <div className="hover-header">
+                <div className="hover-header__brand">
+                  <div className="hover-header__logo">K&D <span>Roofing</span></div>
+                  <div className="hover-header__tagline">Roof Report</div>
+                </div>
+                <div className="hover-header__meta">
+                  <div className="hover-header__address">{address}</div>
+                  <div className="hover-header__date">{reportDate}</div>
+                </div>
+              </div>
+
+              {analysisNotice && <div className="inspect-analysis-notice">{analysisNotice}</div>}
+
+              <div className="hover-actions no-print">
+                <button className="btn btn--primary" onClick={handleDownloadPdf} disabled={pdfBusy}>
+                  {pdfBusy ? '⏳ Generating...' : '📄 Download PDF'}
+                </button>
+                <button className="btn btn--outline" onClick={() => window.print()}>🖨️ Print Report</button>
+                {user && (
+                  <button className="btn btn--secondary" onClick={() => setShowJN(true)}>📤 Send to JobNimbus</button>
+                )}
+              </div>
+
+              {totalPhotos > 0 && (
+                <div className="card hover-section">
+                  <h2 className="hover-section__title">📸 Inspection Photos</h2>
+                  <div className="photo-gallery">
+                    {photos.filter(p => p.preview).map((p, i) => (
+                      <div key={i} className="photo-gallery__item">
+                        <img src={p.preview!} alt={p.label} />
+                        <span className="photo-gallery__label">{p.label}</span>
+                      </div>
+                    ))}
+                    {extraPhotos.map((p, i) => (
+                      <div key={`extra-${i}`} className="photo-gallery__item">
+                        <img src={p.preview} alt={`Extra ${i + 1}`} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <RoofDiagram roofData={roofData} analysis={null} />
+
+              <div className="card hover-section">
+                <div className="hover-section__header">
+                  <h2 className="hover-section__title">Roof Summary</h2>
+                  <span className="hover-section__badge" style={{ background: '#2563eb' }}>SATELLITE</span>
+                </div>
+                <div className="hover-measurement-grid">
+                  <div className="hover-measurement">
+                    <span className="hover-measurement__value">{roofArea.toLocaleString()}</span>
+                    <span className="hover-measurement__label">Total Roof Area (sq ft)</span>
+                  </div>
+                  <div className="hover-measurement">
+                    <span className="hover-measurement__value">{roofSquares}</span>
+                    <span className="hover-measurement__label">Squares</span>
+                  </div>
+                  <div className="hover-measurement">
+                    <span className="hover-measurement__value">{facets}</span>
+                    <span className="hover-measurement__label">Facets</span>
+                  </div>
+                  <div className="hover-measurement">
+                    <span className="hover-measurement__value">{quote.pitchOver12}/12</span>
+                    <span className="hover-measurement__label">{quote.pitchCategory} Pitch</span>
+                  </div>
+                </div>
+                {buildingMeasurements && (
+                  <div className="hover-measurement-grid" style={{ marginTop: 12 }}>
+                    <div className="hover-measurement">
+                      <span className="hover-measurement__value">{buildingMeasurements.buildingLength}' × {buildingMeasurements.buildingWidth}'</span>
+                      <span className="hover-measurement__label">Est. Building Dimensions</span>
+                    </div>
+                    <div className="hover-measurement">
+                      <span className="hover-measurement__value">{buildingMeasurements.footprintSqFt.toLocaleString()}</span>
+                      <span className="hover-measurement__label">Footprint (sq ft)</span>
+                    </div>
+                    <div className="hover-measurement">
+                      <span className="hover-measurement__value">{buildingMeasurements.buildingPerimeter}'</span>
+                      <span className="hover-measurement__label">Perimeter</span>
+                    </div>
+                    <div className="hover-measurement">
+                      <span className="hover-measurement__value">{buildingMeasurements.calculatedWallArea.toLocaleString()}</span>
+                      <span className="hover-measurement__label">Est. Net Wall (sq ft)</span>
+                    </div>
+                  </div>
+                )}
+                <p className="hover-condition-note">
+                  {analysisNotice
+                    ? 'Photo analysis was unavailable. This report uses satellite roof data for the address.'
+                    : `Measured from satellite roof data. Wall area assumes ${buildingMeasurements?.stories || 2} stories. Add photos for material, damage, and siding condition.`}
+                </p>
+                <h4 className="hover-table-title">Roof Waste Factor</h4>
+                <table className="hover-table">
+                  <thead><tr><th>Factor</th><th>Area (sq ft)</th><th>Squares</th></tr></thead>
+                  <tbody>
+                    {roofWaste.map(pct => {
+                      const a = Math.round(roofArea * (1 + pct));
+                      const label = pct === 0 ? 'Zero Waste' : `+${Math.round(pct * 100)}%`;
+                      return <tr key={label}><td>{label}</td><td>{a.toLocaleString()}</td><td>{(a / 100).toFixed(1)}</td></tr>;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="card hover-section hover-quote-section">
+                <h2 className="hover-section__title">Quote Summary</h2>
+                <div className="hover-quote-table">
+                  <div className="hover-quote-row">
+                    <span>Roof Replacement <small>(satellite measurement)</small></span>
+                    <strong>{formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}</strong>
+                  </div>
+                  <div className="hover-quote-total">
+                    <span>Total Estimated</span>
+                    <strong>{formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}</strong>
+                  </div>
+                </div>
+                <p className="hover-quote-disclaimer">
+                  {analysisNotice
+                    ? '*Photo analysis was unavailable. Estimate based on satellite roof data for this address. Final pricing subject to on-site confirmation.'
+                    : '*Estimate based on satellite roof data for this address. Add photos for an AI inspection. Final pricing subject to on-site confirmation.'}
+                </p>
+              </div>
+
+              <div className="card hover-section no-print">
+                <h3 className="hover-section__title">📧 Send Report</h3>
+                {reportSent ? (
+                  <div className="inspect-report-sent">
+                    <span className="inspect-report-sent__icon">✅</span>
+                    <p>Report sent to todd@kanddroofingnc.com{repEmail ? ` and ${repEmail}` : ''}</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="form-group">
+                      <label htmlFor="repEmailAddress">Your Email (optional)</label>
+                      <input
+                        id="repEmailAddress"
+                        className="input"
+                        type="email"
+                        placeholder="rep@kanddroofingnc.com"
+                        value={repEmail}
+                        onChange={e => setRepEmail(e.target.value)}
+                      />
+                    </div>
+                    <button className="btn btn--secondary" onClick={handleSendReport} disabled={sendingReport}>
+                      {sendingReport && <span className="spinner" />}
+                      {sendingReport ? 'Sending...' : 'Save & Send Report'}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="no-print" style={{ textAlign: 'center', padding: '16px 0' }}>
+                <button className="btn btn--outline" onClick={() => window.location.reload()}>Start New Inspection</button>
+              </div>
+            </div>
+          );
+        }
+
+        const view = safeInspection(analysis);
         const roofArea = roofData?.totalAreaSqFt || 0;
         const roofSquares = quote?.roofSquares || 0;
-        const facets = analysis.estimatedFacets || roofData?.segments || 0;
-        const ridgeLen = analysis.estimatedRidgeLength || 0;
-        const valleyLen = analysis.estimatedValleyLength || 0;
-        const rakeLen = analysis.estimatedRakeLength || 0;
-        const eaveLen = analysis.estimatedEaveLength || 0;
-        const dripEdge = analysis.estimatedDripEdge || (rakeLen + eaveLen);
-        const openingsArea = analysis.estimatedOpeningsArea || 0;
+        const facets = view.estimatedFacets || (typeof roofData?.segments === 'number' ? roofData.segments : 0);
+        const ridgeLen = view.estimatedRidgeLength || 0;
+        const valleyLen = view.estimatedValleyLength || 0;
+        const rakeLen = view.estimatedRakeLength || 0;
+        const eaveLen = view.estimatedEaveLength || 0;
+        const dripEdge = view.estimatedDripEdge || (rakeLen + eaveLen);
+        const openingsArea = view.estimatedOpeningsArea || 0;
         const netWallArea = wallArea - openingsArea;
-        const ridgeCount = analysis.features.filter(f => f.type.toLowerCase().includes('ridge') || f.type.toLowerCase().includes('hip')).reduce((s, f) => s + f.count, 0);
-        const valleyCount = analysis.features.filter(f => f.type.toLowerCase().includes('valley')).reduce((s, f) => s + f.count, 0);
+        const ridgeCount = view.features.filter(f => f.type.toLowerCase().includes('ridge') || f.type.toLowerCase().includes('hip')).reduce((s, f) => s + f.count, 0);
+        const valleyCount = view.features.filter(f => f.type.toLowerCase().includes('valley')).reduce((s, f) => s + f.count, 0);
         const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
         const roofWaste = [
@@ -639,9 +842,11 @@ export default function InspectPage() {
                     🛰️ SATELLITE MEASURED
                   </span>
                 )}
-                <span className="hover-section__badge" style={{ background: conditionColor(analysis.sidingCondition.rating) }}>
-                  {analysis.sidingCondition.rating.toUpperCase()}
-                </span>
+                {view.sidingRating ? (
+                  <span className={conditionBadgeClass(view.sidingRating, 'hover-section__badge')}>
+                    {view.sidingRating.toUpperCase()}
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -650,7 +855,7 @@ export default function InspectPage() {
               <div className="hover-measurement-grid" style={{ marginBottom: '12px' }}>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.buildingLength}' × {buildingMeasurements.buildingWidth}'</span>
-                  <span className="hover-measurement__label">Building Dimensions</span>
+                  <span className="hover-measurement__label">Est. Building Dimensions</span>
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.footprintSqFt.toLocaleString()}</span>
@@ -681,33 +886,20 @@ export default function InspectPage() {
                 <span className="hover-measurement__label">Net Siding (sq ft)</span>
               </div>
               <div className="hover-measurement">
-                <span className="hover-measurement__value">{analysis.sidingMaterial}</span>
+                <span className="hover-measurement__value">{view.sidingMaterial || '—'}</span>
                 <span className="hover-measurement__label">Material</span>
               </div>
             </div>
 
-            {analysis.estimatedCorners && (
+            {view.estimatedCorners && (
               <div className="hover-detail-row">
-                <span>Corners — Inside: {analysis.estimatedCorners.inside} · Outside: {analysis.estimatedCorners.outside}</span>
-                {analysis.estimatedTrimLength ? <span>Trim: ~{analysis.estimatedTrimLength} lin ft</span> : null}
+                <span>Corners — Inside: {view.estimatedCorners.inside} · Outside: {view.estimatedCorners.outside}</span>
+                {view.estimatedTrimLength ? <span>Trim: ~{view.estimatedTrimLength} lin ft</span> : null}
               </div>
             )}
 
-            <p className="hover-condition-note">{analysis.sidingCondition.notes}</p>
-
-            {analysis.sidingDamage.length > 0 && (
-              <div className="hover-damage-list">
-                {analysis.sidingDamage.map((d, i) => (
-                  <div key={i} className="hover-damage-item">
-                    <span className="hover-damage-dot" style={{ background: severityColor(d.severity) }} />
-                    <div>
-                      <strong>{d.type}</strong> <span className="hover-damage-sev" style={{ color: severityColor(d.severity) }}>({d.severity})</span>
-                      <div className="hover-damage-desc">{d.description} — {d.location}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {view.sidingNotes ? <p className="hover-condition-note">{view.sidingNotes}</p> : null}
+            <SidingDamageList items={view.sidingDamage} />
 
             {/* Siding Waste Table */}
             <h4 className="hover-table-title">Siding Waste Factor</h4>
@@ -730,9 +922,11 @@ export default function InspectPage() {
           <div className="card hover-section">
             <div className="hover-section__header">
               <h2 className="hover-section__title">Roof Summary</h2>
-              <span className="hover-section__badge" style={{ background: conditionColor(analysis.overallCondition.rating) }}>
-                {analysis.overallCondition.rating.toUpperCase()}
-              </span>
+              {view.overallRating ? (
+                <span className={conditionBadgeClass(view.overallRating, 'hover-section__badge')}>
+                  {view.overallRating.toUpperCase()}
+                </span>
+              ) : null}
             </div>
 
             <div className="hover-measurement-grid">
@@ -749,7 +943,7 @@ export default function InspectPage() {
                 <span className="hover-measurement__label">Facets</span>
               </div>
               <div className="hover-measurement">
-                <span className="hover-measurement__value">{analysis.roofType}</span>
+                <span className="hover-measurement__value">{view.roofType || '—'}</span>
                 <span className="hover-measurement__label">Roof Type</span>
               </div>
             </div>
@@ -776,19 +970,7 @@ export default function InspectPage() {
               <span className="hover-pitch-label">{quote?.pitchCategory || ''} — {quote?.avgPitchDegrees?.toFixed(1) || '—'}°</span>
             </div>
 
-            {/* Features */}
-            {analysis.features.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Features Detected</h4>
-                <div className="hover-badges">
-                  {analysis.features.map((f, i) => (
-                    <span key={i} className="hover-feature-badge">
-                      {f.type} <strong>×{f.count}</strong>
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
+            <FeatureList features={view.features} />
 
             {/* Roof Waste Table */}
             <h4 className="hover-table-title">Roof Waste Factor</h4>
@@ -807,86 +989,14 @@ export default function InspectPage() {
             </table>
           </div>
 
-          {/* AI INSPECTION NOTES */}
-          <div className="card hover-section">
-            <h2 className="hover-section__title">AI Inspection Notes</h2>
-
-            {/* Overall Condition */}
-            <div className="hover-condition-block">
-              <span className="hover-condition-badge" style={{ background: conditionColor(analysis.overallCondition.rating) }}>
-                {analysis.overallCondition.rating.toUpperCase()}
-              </span>
-              <span className="hover-condition-text">{analysis.overallCondition.notes}</span>
-            </div>
-
-            {/* Complexity */}
-            <div className="hover-complexity">
-              <span className="hover-complexity__label">Complexity Rating</span>
-              <div className="hover-complexity__bar">
-                {[1, 2, 3, 4, 5].map(n => (
-                  <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`}
-                    style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }} />
-                ))}
-              </div>
-              <span className="hover-complexity__text">{complexityRating}/5 — {analysis.complexity.explanation}</span>
-            </div>
-
-            {/* Damage Findings */}
-            {analysis.damage.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Roof Damage Findings</h4>
-                <div className="hover-damage-list">
-                  {analysis.damage.map((d, i) => (
-                    <div key={i} className="hover-damage-item">
-                      <span className="hover-damage-dot" style={{ background: severityColor(d.severity) }} />
-                      <div>
-                        <strong>{d.type}</strong> <span className="hover-damage-sev" style={{ color: severityColor(d.severity) }}>({d.severity})</span>
-                        <div className="hover-damage-desc">{d.description} — {d.location}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Access Issues */}
-            {analysis.accessIssues.length > 0 && (
-              <>
-                <h4 className="hover-table-title">⚠️ Access Issues</h4>
-                <div className="hover-badges">
-                  {analysis.accessIssues.map((a, i) => (
-                    <span key={i} className="hover-feature-badge hover-feature-badge--warn">{a}</span>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Recommendations */}
-            {analysis.recommendations.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Recommendations</h4>
-                <ul className="hover-recs">
-                  {analysis.recommendations.map((r, i) => <li key={i}>{r}</li>)}
-                </ul>
-              </>
-            )}
-
-            {analysis.sidingRecommendations.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Siding Recommendations</h4>
-                <ul className="hover-recs">
-                  {analysis.sidingRecommendations.map((r, i) => <li key={i}>{r}</li>)}
-                </ul>
-              </>
-            )}
-          </div>
+          <AiInspectionNotes view={{ ...view, complexityRating }} />
 
           {/* QUOTE SUMMARY */}
           <div className="card hover-section hover-quote-section">
             <h2 className="hover-section__title">Quote Summary</h2>
             <div className="hover-quote-table">
               <div className="hover-quote-row">
-                <span>Roof Replacement <small>({analysis.material.type} · {complexityRating}/5 complexity)</small></span>
+                <span>Roof Replacement <small>({view.materialType || '—'} · {complexityRating}/5 complexity)</small></span>
                 <strong>{formatPrice(adjLow)} – {formatPrice(adjHigh)}</strong>
               </div>
               {wallArea > 0 && (

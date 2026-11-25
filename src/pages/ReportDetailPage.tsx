@@ -43,8 +43,8 @@ export default function ReportDetailPage() {
   const reportPhotos: string[] = (typeof report.photos === 'string' ? JSON.parse(report.photos) : report.photos) || [];
   const address = report.address;
 
-  const complexityRating = analysis?.complexity?.rating || 3;
-  const complexityMult = COMPLEXITY_MULTIPLIERS[complexityRating] || 1.1;
+  const complexityRating = analysis ? (analysis.complexity?.rating || 3) : 0;
+  const complexityMult = analysis ? (COMPLEXITY_MULTIPLIERS[complexityRating] || 1.1) : 1;
   const adjLow = Math.round((quote?.lowEstimate || 0) * complexityMult / 100) * 100;
   const adjHigh = Math.round((quote?.highEstimate || 0) * complexityMult / 100) * 100;
   const wallArea = analysis?.estimatedWallArea || 0;
@@ -118,8 +118,8 @@ export default function ReportDetailPage() {
         <div className="card hover-section">
           <div className="hover-section__header">
             <h2 className="hover-section__title">Roof Summary</h2>
-            <span className="hover-section__badge" style={{ background: conditionColor(analysis?.overallCondition?.rating || 'fair') }}>
-              {(analysis?.overallCondition?.rating || 'N/A').toUpperCase()}
+            <span className="hover-section__badge" style={{ background: analysis?.overallCondition?.rating ? conditionColor(analysis.overallCondition.rating) : '#2563eb' }}>
+              {(analysis?.overallCondition?.rating || 'SATELLITE').toUpperCase()}
             </span>
           </div>
           <div className="hover-measurement-grid">

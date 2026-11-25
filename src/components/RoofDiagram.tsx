@@ -44,12 +44,18 @@ function getSegmentShade(i: number) {
 export function RoofDiagram({ roofData, analysis }: Props) {
   if (!roofData) return null;
 
-  const bLen = roofData.estimatedLength || 40;
-  const bWid = roofData.estimatedWidth || 30;
-  const avgPitch = roofData.avgPitch || roofData.avgPitchDegrees || 25;
+  const measuredLength = roofData.estimatedLength && roofData.estimatedLength > 0 ? roofData.estimatedLength : 0;
+  const measuredWidth = roofData.estimatedWidth && roofData.estimatedWidth > 0 ? roofData.estimatedWidth : 0;
+  // Drawing scale only. These fallbacks are never printed.
+  const bLen = measuredLength || 40;
+  const bWid = measuredWidth || 30;
+  const measuredPitch = roofData.avgPitch ?? roofData.avgPitchDegrees;
+  const drawPitch = measuredPitch ?? 20;
   const segments: RoofSegment[] = Array.isArray(roofData.segments) ? roofData.segments : [];
-  const stories = analysis?.estimatedStories || 2;
-  const wallH = stories * 9;
+  const measuredStories = analysis?.estimatedStories && analysis.estimatedStories > 0
+    ? analysis.estimatedStories
+    : 0;
+  const wallH = (measuredStories || 1) * 9;
 
   // ---- ROOF PLAN (Bird's Eye) ----
   const planW = 400;
@@ -91,11 +97,7 @@ export function RoofDiagram({ roofData, analysis }: Props) {
     { pts: [tr, br, ridgeR], label: 'Right' },
   ];
 
-  // Distribute segment data across facets
-  const planSegments = facetPolygons.map((f, i) => {
-    const seg = segments[i] || segments[0] || { areaSqFt: 0, pitchDegrees: avgPitch };
-    return { ...f, seg };
-  });
+  const planSegments = facetPolygons.map((f, i) => ({ ...f, seg: segments[i] }));
 
   // ---- ELEVATION VIEWS ----
   const elevW = 180;
@@ -103,15 +105,16 @@ export function RoofDiagram({ roofData, analysis }: Props) {
   const elevMargin = 15;
 
   const elevations = [
-    { label: 'Front', wallW: bLen, pitchDeg: avgPitch },
-    { label: 'Back', wallW: bLen, pitchDeg: avgPitch },
-    { label: 'Left', wallW: bWid, pitchDeg: avgPitch },
-    { label: 'Right', wallW: bWid, pitchDeg: avgPitch },
+    { label: 'Front', wallW: bLen, pitchDeg: drawPitch },
+    { label: 'Back', wallW: bLen, pitchDeg: drawPitch },
+    { label: 'Left', wallW: bWid, pitchDeg: drawPitch },
+    { label: 'Right', wallW: bWid, pitchDeg: drawPitch },
   ];
 
   return (
     <div className="card hover-section" style={{ pageBreakInside: 'avoid' }}>
       <h2 className="hover-section__title">📐 Roof & Elevation Diagrams</h2>
+      <p className="hover-diagram-note">Illustrative — not to scale</p>
 
       {/* Roof Plan */}
       <div style={{ marginBottom: 24 }}>
@@ -130,12 +133,16 @@ export function RoofDiagram({ roofData, analysis }: Props) {
             return (
               <g key={i}>
                 <polygon points={pts} fill={getSegmentShade(i)} fillOpacity={0.35} stroke={NAVY} strokeWidth={1.5} />
-                <text x={centroid.x} y={centroid.y - 6} textAnchor="middle" fontSize={10} fill={NAVY} fontWeight="bold">
-                  {f.seg.areaSqFt.toLocaleString()} sf
-                </text>
-                <text x={centroid.x} y={centroid.y + 8} textAnchor="middle" fontSize={9} fill={NAVY}>
-                  {f.seg.pitchDegrees.toFixed(0)}°
-                </text>
+                {f.seg ? (
+                  <>
+                    <text x={centroid.x} y={centroid.y - 6} textAnchor="middle" fontSize={10} fill={NAVY} fontWeight="bold">
+                      {Math.round(f.seg.areaSqFt).toLocaleString()} sf
+                    </text>
+                    <text x={centroid.x} y={centroid.y + 8} textAnchor="middle" fontSize={9} fill={NAVY}>
+                      {f.seg.pitchDegrees.toFixed(0)}°
+                    </text>
+                  </>
+                ) : null}
               </g>
             );
           })}
@@ -144,14 +151,12 @@ export function RoofDiagram({ roofData, analysis }: Props) {
           <line x1={ridgeL.x} y1={ridgeL.y} x2={ridgeR.x} y2={ridgeR.y} stroke={NAVY} strokeWidth={2.5} />
           <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill={NAVY} fontStyle="italic">ridge</text>
 
-          {/* Dimension labels */}
-          <text x={cx} y={oy - 8} textAnchor="middle" fontSize={10} fill={NAVY}>{bLen}'</text>
-          <text x={ox - 10} y={oy + rh / 2} textAnchor="middle" fontSize={10} fill={NAVY} transform={`rotate(-90, ${ox - 10}, ${oy + rh / 2})`}>{bWid}'</text>
-
-          {/* Total area */}
-          <text x={cx} y={planH - 6} textAnchor="middle" fontSize={11} fill={NAVY} fontWeight="bold">
-            Total: {roofData.totalAreaSqFt.toLocaleString()} sq ft
-          </text>
+          {/* Total area is the measured roof figure. Plan length and width are not labeled. */}
+          {typeof roofData.totalAreaSqFt === 'number' && (
+            <text x={cx} y={planH - 6} textAnchor="middle" fontSize={11} fill={NAVY} fontWeight="bold">
+              Total: {roofData.totalAreaSqFt.toLocaleString()} sq ft
+            </text>
+          )}
         </svg>
       </div>
 
@@ -193,7 +198,7 @@ export function RoofDiagram({ roofData, analysis }: Props) {
               {/* Windows */}
               <rect x={eox + ew * 0.15} y={topY + eh * 0.2} width={winW} height={winH} fill="white" stroke={NAVY} strokeWidth={0.8} />
               <rect x={eox + ew * 0.75} y={topY + eh * 0.2} width={winW} height={winH} fill="white" stroke={NAVY} strokeWidth={0.8} />
-              {stories >= 2 && (
+              {measuredStories >= 2 && (
                 <>
                   <rect x={eox + ew * 0.15} y={topY + eh * 0.55} width={winW} height={winH} fill="white" stroke={NAVY} strokeWidth={0.8} />
                   <rect x={eox + ew * 0.75} y={topY + eh * 0.55} width={winW} height={winH} fill="white" stroke={NAVY} strokeWidth={0.8} />
@@ -202,7 +207,6 @@ export function RoofDiagram({ roofData, analysis }: Props) {
 
               {/* Labels */}
               <text x={elevW / 2} y={elevMargin - 2} textAnchor="middle" fontSize={10} fill={NAVY} fontWeight="bold">{elev.label}</text>
-              <text x={elevW / 2} y={baseY + 12} textAnchor="middle" fontSize={9} fill={NAVY}>{elev.wallW}' wide × {wallH}' tall</text>
             </svg>
           );
         })}
