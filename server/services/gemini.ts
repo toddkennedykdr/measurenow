@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Inspect photo analysis via the Gemini Developer API.
  *
@@ -63,6 +65,165 @@ MEASUREMENT ESTIMATION GUIDELINES:
 - estimatedFacets: total number of distinct roof planes/faces
 - estimatedWallArea: total exterior wall sq ft based on visible walls, stories, and approximate footprint. For a ~1500 sq ft footprint 2-story house, walls are roughly 2400-3000 sq ft.
 Use your best professional judgment for all estimates. If you cannot determine something, use reasonable defaults. Always provide the full structure.`;
+
+const stringSchema = { type: 'STRING' };
+const numberSchema = { type: 'NUMBER' };
+
+/** Gemini responseSchema. Required fields match what the report renders. */
+export const INSPECTION_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    roofType: stringSchema,
+    material: {
+      type: 'OBJECT',
+      properties: { type: stringSchema, condition: stringSchema },
+      required: ['type', 'condition'],
+    },
+    features: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: { type: stringSchema, count: numberSchema, location: stringSchema },
+        required: ['type', 'count', 'location'],
+      },
+    },
+    complexity: {
+      type: 'OBJECT',
+      properties: { rating: numberSchema, explanation: stringSchema },
+      required: ['rating', 'explanation'],
+    },
+    damage: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          type: stringSchema,
+          severity: stringSchema,
+          location: stringSchema,
+          description: stringSchema,
+        },
+        required: ['type', 'severity', 'location', 'description'],
+      },
+    },
+    accessIssues: { type: 'ARRAY', items: stringSchema },
+    estimatedStories: numberSchema,
+    overallCondition: {
+      type: 'OBJECT',
+      properties: { rating: stringSchema, notes: stringSchema },
+      required: ['rating', 'notes'],
+    },
+    recommendations: { type: 'ARRAY', items: stringSchema },
+    sidingMaterial: stringSchema,
+    sidingCondition: {
+      type: 'OBJECT',
+      properties: { rating: stringSchema, notes: stringSchema },
+      required: ['rating', 'notes'],
+    },
+    sidingDamage: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          type: stringSchema,
+          severity: stringSchema,
+          location: stringSchema,
+          description: stringSchema,
+        },
+        required: ['type', 'severity', 'location', 'description'],
+      },
+    },
+    sidingRecommendations: { type: 'ARRAY', items: stringSchema },
+    estimatedWallArea: numberSchema,
+    estimatedOpeningsArea: numberSchema,
+    estimatedTrimLength: numberSchema,
+    estimatedRidgeLength: numberSchema,
+    estimatedValleyLength: numberSchema,
+    estimatedRakeLength: numberSchema,
+    estimatedEaveLength: numberSchema,
+    estimatedDripEdge: numberSchema,
+    estimatedFacets: numberSchema,
+    estimatedCorners: {
+      type: 'OBJECT',
+      properties: { inside: numberSchema, outside: numberSchema },
+      required: ['inside', 'outside'],
+    },
+  },
+  required: [
+    'roofType',
+    'material',
+    'features',
+    'complexity',
+    'damage',
+    'accessIssues',
+    'overallCondition',
+    'recommendations',
+    'sidingMaterial',
+    'sidingCondition',
+    'sidingDamage',
+    'sidingRecommendations',
+  ],
+};
+
+const finiteNumber = z.coerce.number().finite();
+const requiredText = z.string().min(1);
+const damageItem = z.object({
+  type: requiredText,
+  severity: z.string(),
+  location: z.string().optional().default(''),
+  description: z.string().optional().default(''),
+});
+
+const inspectionAnalysisSchema = z.object({
+  roofType: requiredText,
+  material: z.object({
+    type: requiredText,
+    condition: requiredText,
+  }),
+  features: z.array(z.object({
+    type: requiredText,
+    count: finiteNumber,
+    location: z.string().optional().default(''),
+  })),
+  complexity: z.object({
+    rating: finiteNumber,
+    explanation: z.string(),
+  }),
+  damage: z.array(damageItem),
+  accessIssues: z.array(z.string()),
+  estimatedStories: finiteNumber.optional(),
+  overallCondition: z.object({
+    rating: requiredText,
+    notes: z.string(),
+  }),
+  recommendations: z.array(z.string()),
+  sidingMaterial: requiredText,
+  sidingCondition: z.object({
+    rating: requiredText,
+    notes: z.string(),
+  }),
+  sidingDamage: z.array(damageItem),
+  sidingRecommendations: z.array(z.string()),
+  estimatedWallArea: finiteNumber.optional(),
+  estimatedOpeningsArea: finiteNumber.optional(),
+  estimatedTrimLength: finiteNumber.optional(),
+  estimatedRidgeLength: finiteNumber.optional(),
+  estimatedValleyLength: finiteNumber.optional(),
+  estimatedRakeLength: finiteNumber.optional(),
+  estimatedEaveLength: finiteNumber.optional(),
+  estimatedDripEdge: finiteNumber.optional(),
+  estimatedFacets: finiteNumber.optional(),
+  estimatedCorners: z.object({
+    inside: finiteNumber,
+    outside: finiteNumber,
+  }).optional(),
+});
+
+/** Accept a complete analysis and coerce numeric strings. Reject partial or mis-typed JSON. */
+export function normalizeInspectionAnalysis(value: unknown): Record<string, unknown> | null {
+  const parsed = inspectionAnalysisSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return parsed.data;
+}
 
 export interface GeminiImage {
   mimeType: string;
@@ -140,6 +301,11 @@ function classifyProviderFailure(status: number, errorStatus: string, message: s
   return 'upstream';
 }
 
+function isTimeout(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.name === 'TimeoutError' || err.name === 'AbortError' || /timeout/i.test(err.message);
+}
+
 function unavailable(reason: string, detail: string): GeminiAnalysisResult {
   console.error(`Gemini API error (${reason}): ${redactSecrets(detail)}`);
   return { ok: false, userMessage: ANALYSIS_UNAVAILABLE_MESSAGE };
@@ -193,6 +359,7 @@ export async function analyzeInspectionPhotos(input: {
           temperature: 0.2,
           maxOutputTokens: 4096,
           responseMimeType: 'application/json',
+          responseSchema: INSPECTION_RESPONSE_SCHEMA,
           thinkingConfig: { thinkingLevel: 'MINIMAL' },
         },
       }),
@@ -200,7 +367,8 @@ export async function analyzeInspectionPhotos(input: {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'request failed';
-    return unavailable('upstream', `model=${GEMINI_MODEL} request failed: ${message}`);
+    const reason = isTimeout(err) ? 'timeout' : 'upstream';
+    return unavailable(reason, `model=${GEMINI_MODEL} request failed: ${message}`);
   }
 
   const rawBody = await response.text();
@@ -228,9 +396,11 @@ export async function analyzeInspectionPhotos(input: {
     return unavailable('invalid response', `model=${GEMINI_MODEL} response was not JSON`);
   }
 
-  const blockReason = parsedBody.promptFeedback?.blockReason;
+  const finishReason = parsedBody.candidates?.[0]?.finishReason;
+  const blockReason = parsedBody.promptFeedback?.blockReason
+    || (finishReason === 'SAFETY' ? 'SAFETY' : '');
   if (blockReason) {
-    return unavailable('upstream', `model=${GEMINI_MODEL} blocked: ${blockReason}`);
+    return unavailable('safety block', `model=${GEMINI_MODEL} blockReason=${blockReason}`);
   }
 
   const raw = responseText(parsedBody);
@@ -240,13 +410,15 @@ export async function analyzeInspectionPhotos(input: {
   }
 
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  let parsed: unknown;
   try {
-    const analysis = JSON.parse(cleaned) as Record<string, unknown>;
-    if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) {
-      return unavailable('invalid response', `model=${GEMINI_MODEL} analysis was not a JSON object`);
-    }
-    return { ok: true, analysis };
+    parsed = JSON.parse(cleaned);
   } catch {
     return unavailable('invalid response', `model=${GEMINI_MODEL} could not parse analysis JSON`);
   }
+  const analysis = normalizeInspectionAnalysis(parsed);
+  if (!analysis) {
+    return unavailable('invalid response', `model=${GEMINI_MODEL} analysis failed validation`);
+  }
+  return { ok: true, analysis };
 }

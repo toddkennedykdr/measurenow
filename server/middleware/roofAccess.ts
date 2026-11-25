@@ -25,7 +25,6 @@ const PUBLIC_WIDGET_ROUTES = new Set([
   'GET /maps-key',
   'POST /geocode',
   'POST /quote',
-  'POST /address-report',
 ]);
 
 export function isPublicWidgetRoute(method: string, path: string): boolean {

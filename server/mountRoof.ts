@@ -8,9 +8,8 @@ import { roofRouter } from './routes/roof';
  *   GET  /api/roof/maps-key
  *   POST /api/roof/geocode
  *   POST /api/roof/quote
- *   POST /api/roof/address-report
- * Staff routes on this prefix (analyze-photos, send-report, and anything
- * added later) stay behind a logged-in session or ROOF_API_KEY.
+ * Staff routes on this prefix (address-report, analyze-photos, send-report,
+ * and anything added later) stay behind a logged-in session or ROOF_API_KEY.
  */
 export function mountRoofRoutes(app: Express): void {
   app.use('/api/roof', roofRateLimit, requireRoofAccessUnlessPublic);

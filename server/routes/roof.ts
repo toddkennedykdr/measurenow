@@ -43,7 +43,8 @@ const addressReportSchema = quoteSchema.extend({
   address: z.string().optional(),
 });
 
-const NO_ROOF_DATA = "We don't have roof data for this location yet. Please call us for a free estimate!";
+const QUOTE_NO_ROOF_DATA = "We don't have roof data for this location yet. Please call us for a free estimate!";
+const ADDRESS_REPORT_NO_ROOF_DATA = "We don't have roof data for this location yet. Call K&D Roofing at (919) 977-4074 to schedule a documented inspection.";
 
 // Step 1: Geocode only — returns lat/lng and formatted address
 roofRouter.post('/geocode', async (req: Request, res: Response) => {
@@ -85,7 +86,7 @@ roofRouter.post('/quote', async (req: Request, res: Response) => {
 
     const building = await getBuildingInsights(lat, lng);
     if (!building) {
-      return res.status(404).json({ error: NO_ROOF_DATA });
+      return res.status(404).json({ error: QUOTE_NO_ROOF_DATA });
     }
 
     const report = buildAddressRoofReport(building);
@@ -112,12 +113,11 @@ roofRouter.post('/address-report', async (req: Request, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid coordinates.' });
     }
-    if (!skipsPublicDailyCap(req) && rejectIfPublicDailyCap(res)) return;
 
     const { lat, lng, address } = parsed.data;
     const building = await getBuildingInsights(lat, lng);
     if (!building) {
-      return res.status(404).json({ error: NO_ROOF_DATA });
+      return res.status(404).json({ error: ADDRESS_REPORT_NO_ROOF_DATA });
     }
 
     const report = buildAddressRoofReport(building);

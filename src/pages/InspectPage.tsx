@@ -3,7 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
+import { PartialAnalysisView } from '../components/PartialAnalysisView';
 import { useAuth } from '../context/AuthContext';
+import { safeInspection } from '../lib/safeInspection';
 
 // Types
 interface PhotoSlot {
@@ -359,7 +361,15 @@ export default function InspectPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ repEmail, address, roofData, quote, analysis, buildingMeasurements }),
+        body: JSON.stringify({
+          repEmail,
+          address,
+          roofData,
+          quote,
+          analysis,
+          buildingMeasurements,
+          photoAnalysisUnavailable: Boolean(analysisNotice),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -395,8 +405,8 @@ export default function InspectPage() {
   };
 
   // Computed values for report
-  const complexityRating = analysis ? (analysis.complexity?.rating || 3) : 0;
-  const complexityMult = analysis ? (COMPLEXITY_MULTIPLIERS[complexityRating] || 1.1) : 1;
+  const complexityRating = analysis?.complexity?.rating || 0;
+  const complexityMult = complexityRating ? (COMPLEXITY_MULTIPLIERS[complexityRating] || 1.1) : 1;
   const adjLow = Math.round((quote?.lowEstimate || 0) * complexityMult / 100) * 100;
   const adjHigh = Math.round((quote?.highEstimate || 0) * complexityMult / 100) * 100;
 
@@ -681,8 +691,9 @@ export default function InspectPage() {
                   </div>
                 )}
                 <p className="hover-condition-note">
-                  Measured from satellite roof data. Wall area assumes {buildingMeasurements?.stories || 2} stories.
-                  Add photos for material, damage, and siding condition.
+                  {analysisNotice
+                    ? 'Photo analysis was unavailable. This report uses satellite roof data for the address.'
+                    : `Measured from satellite roof data. Wall area assumes ${buildingMeasurements?.stories || 2} stories. Add photos for material, damage, and siding condition.`}
                 </p>
                 <h4 className="hover-table-title">Roof Waste Factor</h4>
                 <table className="hover-table">
@@ -709,7 +720,11 @@ export default function InspectPage() {
                     <strong>{formatPrice(quote.lowEstimate)} – {formatPrice(quote.highEstimate)}</strong>
                   </div>
                 </div>
-                <p className="hover-quote-disclaimer">*Estimate based on satellite roof data for this address. Add photos for an AI inspection. Final pricing subject to on-site confirmation.</p>
+                <p className="hover-quote-disclaimer">
+                  {analysisNotice
+                    ? '*Photo analysis was unavailable. Estimate based on satellite roof data for this address. Final pricing subject to on-site confirmation.'
+                    : '*Estimate based on satellite roof data for this address. Add photos for an AI inspection. Final pricing subject to on-site confirmation.'}
+                </p>
               </div>
 
               <div className="card hover-section no-print">
@@ -747,18 +762,19 @@ export default function InspectPage() {
           );
         }
 
+        const view = safeInspection(analysis);
         const roofArea = roofData?.totalAreaSqFt || 0;
         const roofSquares = quote?.roofSquares || 0;
-        const facets = analysis.estimatedFacets || roofData?.segments || 0;
-        const ridgeLen = analysis.estimatedRidgeLength || 0;
-        const valleyLen = analysis.estimatedValleyLength || 0;
-        const rakeLen = analysis.estimatedRakeLength || 0;
-        const eaveLen = analysis.estimatedEaveLength || 0;
-        const dripEdge = analysis.estimatedDripEdge || (rakeLen + eaveLen);
-        const openingsArea = analysis.estimatedOpeningsArea || 0;
+        const facets = view.estimatedFacets || (typeof roofData?.segments === 'number' ? roofData.segments : 0);
+        const ridgeLen = view.estimatedRidgeLength || 0;
+        const valleyLen = view.estimatedValleyLength || 0;
+        const rakeLen = view.estimatedRakeLength || 0;
+        const eaveLen = view.estimatedEaveLength || 0;
+        const dripEdge = view.estimatedDripEdge || (rakeLen + eaveLen);
+        const openingsArea = view.estimatedOpeningsArea || 0;
         const netWallArea = wallArea - openingsArea;
-        const ridgeCount = analysis.features.filter(f => f.type.toLowerCase().includes('ridge') || f.type.toLowerCase().includes('hip')).reduce((s, f) => s + f.count, 0);
-        const valleyCount = analysis.features.filter(f => f.type.toLowerCase().includes('valley')).reduce((s, f) => s + f.count, 0);
+        const ridgeCount = view.features.filter(f => f.type.toLowerCase().includes('ridge') || f.type.toLowerCase().includes('hip')).reduce((s, f) => s + f.count, 0);
+        const valleyCount = view.features.filter(f => f.type.toLowerCase().includes('valley')).reduce((s, f) => s + f.count, 0);
         const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
         const roofWaste = [
@@ -836,9 +852,11 @@ export default function InspectPage() {
                     🛰️ SATELLITE MEASURED
                   </span>
                 )}
-                <span className="hover-section__badge" style={{ background: conditionColor(analysis.sidingCondition.rating) }}>
-                  {analysis.sidingCondition.rating.toUpperCase()}
-                </span>
+                {view.sidingRating ? (
+                  <span className="hover-section__badge" style={{ background: conditionColor(view.sidingRating) }}>
+                    {view.sidingRating.toUpperCase()}
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -878,33 +896,19 @@ export default function InspectPage() {
                 <span className="hover-measurement__label">Net Siding (sq ft)</span>
               </div>
               <div className="hover-measurement">
-                <span className="hover-measurement__value">{analysis.sidingMaterial}</span>
+                <span className="hover-measurement__value">{view.sidingMaterial || '—'}</span>
                 <span className="hover-measurement__label">Material</span>
               </div>
             </div>
 
-            {analysis.estimatedCorners && (
+            {view.estimatedCorners && (
               <div className="hover-detail-row">
-                <span>Corners — Inside: {analysis.estimatedCorners.inside} · Outside: {analysis.estimatedCorners.outside}</span>
-                {analysis.estimatedTrimLength ? <span>Trim: ~{analysis.estimatedTrimLength} lin ft</span> : null}
+                <span>Corners — Inside: {view.estimatedCorners.inside} · Outside: {view.estimatedCorners.outside}</span>
+                {view.estimatedTrimLength ? <span>Trim: ~{view.estimatedTrimLength} lin ft</span> : null}
               </div>
             )}
 
-            <p className="hover-condition-note">{analysis.sidingCondition.notes}</p>
-
-            {analysis.sidingDamage.length > 0 && (
-              <div className="hover-damage-list">
-                {analysis.sidingDamage.map((d, i) => (
-                  <div key={i} className="hover-damage-item">
-                    <span className="hover-damage-dot" style={{ background: severityColor(d.severity) }} />
-                    <div>
-                      <strong>{d.type}</strong> <span className="hover-damage-sev" style={{ color: severityColor(d.severity) }}>({d.severity})</span>
-                      <div className="hover-damage-desc">{d.description} — {d.location}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {view.sidingNotes ? <p className="hover-condition-note">{view.sidingNotes}</p> : null}
 
             {/* Siding Waste Table */}
             <h4 className="hover-table-title">Siding Waste Factor</h4>
@@ -927,9 +931,11 @@ export default function InspectPage() {
           <div className="card hover-section">
             <div className="hover-section__header">
               <h2 className="hover-section__title">Roof Summary</h2>
-              <span className="hover-section__badge" style={{ background: conditionColor(analysis.overallCondition.rating) }}>
-                {analysis.overallCondition.rating.toUpperCase()}
-              </span>
+              {view.overallRating ? (
+                <span className="hover-section__badge" style={{ background: conditionColor(view.overallRating) }}>
+                  {view.overallRating.toUpperCase()}
+                </span>
+              ) : null}
             </div>
 
             <div className="hover-measurement-grid">
@@ -946,7 +952,7 @@ export default function InspectPage() {
                 <span className="hover-measurement__label">Facets</span>
               </div>
               <div className="hover-measurement">
-                <span className="hover-measurement__value">{analysis.roofType}</span>
+                <span className="hover-measurement__value">{view.roofType || '—'}</span>
                 <span className="hover-measurement__label">Roof Type</span>
               </div>
             </div>
@@ -974,19 +980,6 @@ export default function InspectPage() {
             </div>
 
             {/* Features */}
-            {analysis.features.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Features Detected</h4>
-                <div className="hover-badges">
-                  {analysis.features.map((f, i) => (
-                    <span key={i} className="hover-feature-badge">
-                      {f.type} <strong>×{f.count}</strong>
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
-
             {/* Roof Waste Table */}
             <h4 className="hover-table-title">Roof Waste Factor</h4>
             <table className="hover-table">
@@ -1010,10 +1003,12 @@ export default function InspectPage() {
 
             {/* Overall Condition */}
             <div className="hover-condition-block">
-              <span className="hover-condition-badge" style={{ background: conditionColor(analysis.overallCondition.rating) }}>
-                {analysis.overallCondition.rating.toUpperCase()}
-              </span>
-              <span className="hover-condition-text">{analysis.overallCondition.notes}</span>
+              {view.overallRating ? (
+                <span className="hover-condition-badge" style={{ background: conditionColor(view.overallRating) }}>
+                  {view.overallRating.toUpperCase()}
+                </span>
+              ) : null}
+              <span className="hover-condition-text">{view.overallNotes}</span>
             </div>
 
             {/* Complexity */}
@@ -1025,57 +1020,11 @@ export default function InspectPage() {
                     style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }} />
                 ))}
               </div>
-              <span className="hover-complexity__text">{complexityRating}/5 — {analysis.complexity.explanation}</span>
+              <span className="hover-complexity__text">{complexityRating > 0 ? `${complexityRating}/5` : '—'}{view.complexityExplanation ? ` — ${view.complexityExplanation}` : ''}</span>
             </div>
 
             {/* Damage Findings */}
-            {analysis.damage.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Roof Damage Findings</h4>
-                <div className="hover-damage-list">
-                  {analysis.damage.map((d, i) => (
-                    <div key={i} className="hover-damage-item">
-                      <span className="hover-damage-dot" style={{ background: severityColor(d.severity) }} />
-                      <div>
-                        <strong>{d.type}</strong> <span className="hover-damage-sev" style={{ color: severityColor(d.severity) }}>({d.severity})</span>
-                        <div className="hover-damage-desc">{d.description} — {d.location}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Access Issues */}
-            {analysis.accessIssues.length > 0 && (
-              <>
-                <h4 className="hover-table-title">⚠️ Access Issues</h4>
-                <div className="hover-badges">
-                  {analysis.accessIssues.map((a, i) => (
-                    <span key={i} className="hover-feature-badge hover-feature-badge--warn">{a}</span>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Recommendations */}
-            {analysis.recommendations.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Recommendations</h4>
-                <ul className="hover-recs">
-                  {analysis.recommendations.map((r, i) => <li key={i}>{r}</li>)}
-                </ul>
-              </>
-            )}
-
-            {analysis.sidingRecommendations.length > 0 && (
-              <>
-                <h4 className="hover-table-title">Siding Recommendations</h4>
-                <ul className="hover-recs">
-                  {analysis.sidingRecommendations.map((r, i) => <li key={i}>{r}</li>)}
-                </ul>
-              </>
-            )}
+            <PartialAnalysisView analysis={analysis} />
           </div>
 
           {/* QUOTE SUMMARY */}
@@ -1083,7 +1032,7 @@ export default function InspectPage() {
             <h2 className="hover-section__title">Quote Summary</h2>
             <div className="hover-quote-table">
               <div className="hover-quote-row">
-                <span>Roof Replacement <small>({analysis.material.type} · {complexityRating}/5 complexity)</small></span>
+                <span>Roof Replacement <small>({view.materialType || '—'}{complexityRating > 0 ? ` · ${complexityRating}/5 complexity` : ''})</small></span>
                 <strong>{formatPrice(adjLow)} – {formatPrice(adjHigh)}</strong>
               </div>
               {wallArea > 0 && (

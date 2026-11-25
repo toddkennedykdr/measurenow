@@ -945,9 +945,22 @@ body {
 
 .hover-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
-  justify-content: flex-end;
+  justify-content: flex-start;
+}
+
+.hover-actions .btn {
+  width: auto;
+  flex: 1 1 9rem;
+}
+
+.hover-diagram-note {
+  margin: -8px 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gray-500);
 }
 
 .hover-section {
