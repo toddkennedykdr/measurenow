@@ -1153,6 +1153,13 @@ body {
   flex-shrink: 0;
 }
 
+.hover-condition-badge--good,
+.hover-section__badge--good { background: #16a34a; }
+.hover-condition-badge--fair,
+.hover-section__badge--fair { background: #ca8a04; }
+.hover-condition-badge--poor,
+.hover-section__badge--poor { background: #E2312B; }
+
 .hover-condition-text {
   font-size: 14px;
   color: var(--gray-700);

@@ -92,8 +92,11 @@ inspectRouter.post('/send-report', async (req: Request, res: Response) => {
 
     const complexityMultipliers: Record<number, number> = { 1: 1.0, 2: 1.05, 3: 1.1, 4: 1.15, 5: 1.3 };
     const hasAnalysis = !!analysis;
-    const complexityRating = hasAnalysis ? (analysis?.complexity?.rating || 3) : 0;
-    const mult = hasAnalysis ? (complexityMultipliers[complexityRating] || 1.1) : 1;
+    const rawRating = Number(analysis?.complexity?.rating);
+    const complexityRating = hasAnalysis
+      ? Math.min(5, Math.max(1, Math.round(Number.isFinite(rawRating) ? rawRating : 1)))
+      : 0;
+    const mult = hasAnalysis ? complexityMultipliers[complexityRating] : 1;
     const adjLow = Math.round((quote?.lowEstimate || 0) * mult / 100) * 100;
     const adjHigh = Math.round((quote?.highEstimate || 0) * mult / 100) * 100;
 

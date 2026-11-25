@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { NavBar } from '../components/NavBar';
 import { JNModal } from '../components/JNModal';
 import { RoofDiagram } from '../components/RoofDiagram';
-import { PartialAnalysisView } from '../components/PartialAnalysisView';
+import { AiInspectionNotes, FeatureList, SidingDamageList, conditionBadgeClass } from '../components/PhotoAnalysisSections';
 import { useAuth } from '../context/AuthContext';
-import { safeInspection } from '../lib/safeInspection';
+import { clampComplexityRating, safeInspection } from '../lib/safeInspection';
 
 // Types
 interface PhotoSlot {
@@ -134,18 +134,6 @@ function loadGoogleMaps(apiKey: string): Promise<void> {
 
 function formatPrice(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
-
-function severityColor(s: string) {
-  if (s === 'major') return '#E2312B';
-  if (s === 'minor') return '#ca8a04';
-  return '#16a34a';
-}
-
-function conditionColor(c: string) {
-  if (c === 'poor') return '#E2312B';
-  if (c === 'fair') return '#ca8a04';
-  return '#16a34a';
 }
 
 export default function InspectPage() {
@@ -391,7 +379,7 @@ export default function InspectPage() {
       const shortAddr = address.replace(/,?\s*(USA?|United States)$/i, '').trim().replace(/[^a-zA-Z0-9]+/g, '-');
       await html2pdf().from(el).set({
         margin: 0.4,
-        filename: `KD-Roofing-Inspection-${shortAddr}.pdf`,
+        filename: `${analysis ? 'KD-Roofing-Inspection' : 'KD-Roofing-Roof-Report'}-${shortAddr}.pdf`,
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
@@ -405,8 +393,8 @@ export default function InspectPage() {
   };
 
   // Computed values for report
-  const complexityRating = analysis?.complexity?.rating || 0;
-  const complexityMult = complexityRating ? (COMPLEXITY_MULTIPLIERS[complexityRating] || 1.1) : 1;
+  const complexityRating = analysis ? clampComplexityRating(analysis.complexity?.rating) : 0;
+  const complexityMult = analysis ? COMPLEXITY_MULTIPLIERS[complexityRating] : 1;
   const adjLow = Math.round((quote?.lowEstimate || 0) * complexityMult / 100) * 100;
   const adjHigh = Math.round((quote?.highEstimate || 0) * complexityMult / 100) * 100;
 
@@ -424,7 +412,9 @@ export default function InspectPage() {
         <div className="inspect-header__top">
           <div className="header__logo">K&amp;D <span>Roofing</span></div>
         </div>
-        <div className="inspect-header__title">🔍 Roof & Siding Inspection</div>
+        <div className="inspect-header__title">
+          {step === 'report' && !analysis ? '🔍 Roof Report' : '🔍 Roof & Siding Inspection'}
+        </div>
       </header>
 
       {error && <div className="error-msg">{error}</div>}
@@ -674,7 +664,7 @@ export default function InspectPage() {
                   <div className="hover-measurement-grid" style={{ marginTop: 12 }}>
                     <div className="hover-measurement">
                       <span className="hover-measurement__value">{buildingMeasurements.buildingLength}' × {buildingMeasurements.buildingWidth}'</span>
-                      <span className="hover-measurement__label">Building Dimensions</span>
+                      <span className="hover-measurement__label">Est. Building Dimensions</span>
                     </div>
                     <div className="hover-measurement">
                       <span className="hover-measurement__value">{buildingMeasurements.footprintSqFt.toLocaleString()}</span>
@@ -853,7 +843,7 @@ export default function InspectPage() {
                   </span>
                 )}
                 {view.sidingRating ? (
-                  <span className="hover-section__badge" style={{ background: conditionColor(view.sidingRating) }}>
+                  <span className={conditionBadgeClass(view.sidingRating, 'hover-section__badge')}>
                     {view.sidingRating.toUpperCase()}
                   </span>
                 ) : null}
@@ -865,7 +855,7 @@ export default function InspectPage() {
               <div className="hover-measurement-grid" style={{ marginBottom: '12px' }}>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.buildingLength}' × {buildingMeasurements.buildingWidth}'</span>
-                  <span className="hover-measurement__label">Building Dimensions</span>
+                  <span className="hover-measurement__label">Est. Building Dimensions</span>
                 </div>
                 <div className="hover-measurement">
                   <span className="hover-measurement__value">{buildingMeasurements.footprintSqFt.toLocaleString()}</span>
@@ -909,6 +899,7 @@ export default function InspectPage() {
             )}
 
             {view.sidingNotes ? <p className="hover-condition-note">{view.sidingNotes}</p> : null}
+            <SidingDamageList items={view.sidingDamage} />
 
             {/* Siding Waste Table */}
             <h4 className="hover-table-title">Siding Waste Factor</h4>
@@ -932,7 +923,7 @@ export default function InspectPage() {
             <div className="hover-section__header">
               <h2 className="hover-section__title">Roof Summary</h2>
               {view.overallRating ? (
-                <span className="hover-section__badge" style={{ background: conditionColor(view.overallRating) }}>
+                <span className={conditionBadgeClass(view.overallRating, 'hover-section__badge')}>
                   {view.overallRating.toUpperCase()}
                 </span>
               ) : null}
@@ -979,7 +970,8 @@ export default function InspectPage() {
               <span className="hover-pitch-label">{quote?.pitchCategory || ''} — {quote?.avgPitchDegrees?.toFixed(1) || '—'}°</span>
             </div>
 
-            {/* Features */}
+            <FeatureList features={view.features} />
+
             {/* Roof Waste Table */}
             <h4 className="hover-table-title">Roof Waste Factor</h4>
             <table className="hover-table">
@@ -997,42 +989,14 @@ export default function InspectPage() {
             </table>
           </div>
 
-          {/* AI INSPECTION NOTES */}
-          <div className="card hover-section">
-            <h2 className="hover-section__title">AI Inspection Notes</h2>
-
-            {/* Overall Condition */}
-            <div className="hover-condition-block">
-              {view.overallRating ? (
-                <span className="hover-condition-badge" style={{ background: conditionColor(view.overallRating) }}>
-                  {view.overallRating.toUpperCase()}
-                </span>
-              ) : null}
-              <span className="hover-condition-text">{view.overallNotes}</span>
-            </div>
-
-            {/* Complexity */}
-            <div className="hover-complexity">
-              <span className="hover-complexity__label">Complexity Rating</span>
-              <div className="hover-complexity__bar">
-                {[1, 2, 3, 4, 5].map(n => (
-                  <div key={n} className={`hover-complexity__segment ${n <= complexityRating ? 'hover-complexity__segment--active' : ''}`}
-                    style={{ background: n <= complexityRating ? (complexityRating >= 4 ? '#E2312B' : complexityRating >= 3 ? '#ca8a04' : '#16a34a') : undefined }} />
-                ))}
-              </div>
-              <span className="hover-complexity__text">{complexityRating > 0 ? `${complexityRating}/5` : '—'}{view.complexityExplanation ? ` — ${view.complexityExplanation}` : ''}</span>
-            </div>
-
-            {/* Damage Findings */}
-            <PartialAnalysisView analysis={analysis} />
-          </div>
+          <AiInspectionNotes view={{ ...view, complexityRating }} />
 
           {/* QUOTE SUMMARY */}
           <div className="card hover-section hover-quote-section">
             <h2 className="hover-section__title">Quote Summary</h2>
             <div className="hover-quote-table">
               <div className="hover-quote-row">
-                <span>Roof Replacement <small>({view.materialType || '—'}{complexityRating > 0 ? ` · ${complexityRating}/5 complexity` : ''})</small></span>
+                <span>Roof Replacement <small>({view.materialType || '—'} · {complexityRating}/5 complexity)</small></span>
                 <strong>{formatPrice(adjLow)} – {formatPrice(adjHigh)}</strong>
               </div>
               {wallArea > 0 && (

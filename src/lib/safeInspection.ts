@@ -55,6 +55,13 @@ function asNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Ratings outside 1–5 are clamped. 0 is not left as an unrated 1.0x. */
+export function clampComplexityRating(rating: unknown): number {
+  const n = typeof rating === 'number' ? rating : Number(rating);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(5, Math.max(1, Math.round(n)));
+}
+
 function asList(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
